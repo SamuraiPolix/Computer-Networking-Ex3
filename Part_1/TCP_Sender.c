@@ -13,7 +13,7 @@
 
 #define SERVER_PORT 6000
 #define SERVER_IP "127.0.0.1"
-#define TWO_MB 2048
+#define MIN_FILE_SIZE 2097152           // 2MB
 
 char* util_generate_random_data(unsigned int size);
 
@@ -42,11 +42,12 @@ int main(int argc, char *argv[]){
 
     if (inet_pton(AF_INET, SERVER_IP, &(server.sin_addr)) <= 0){
         perror("inet_pton");
+        close(sock);
         exit(1);
     }
 
 
-    int i = 0;
+    // int i = 0;
     // Take port and ip from argv (if failed - use defaults)
     // while (i < argc){
     //     if (argv[i][0] == '-') {
@@ -81,36 +82,44 @@ int main(int argc, char *argv[]){
 
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) == -1){
         perror("connect");
+        close(sock);
         exit(1);
     }
 
     // Generate random data
-    printf("Generating random data, of size %dMB at least\n", TWO_MB);
-    char *data = util_generate_random_data(BUFSIZ);
+    printf("Generating random data, of at least %dMB in size...\n", MIN_FILE_SIZE);
+    char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
 
+    // FILE * f = fopen ("file.txt", "rb");
+    // data = NULL;
+    // size_t len;
+    // ssize_t bytes_read = getdelim( &data, &len, '\0', f);
     #ifdef _DEBUG
     printf("Data generated: %s", data);
     #endif
 
-    int bytes_sent;
+    int bytes_sent, total_bytes_sent;
     unsigned short action = 1;
 
     while (action == 1) {
         printf("Sending the data...\n");
-        bytes_sent = 0;
+        bytes_sent = total_bytes_sent = 0;
         // TODO: understand how to resend bytes that went missing
-        // do {
-            // bytes_sent = send(sock, data, strlen(data)+1-bytes_sent, 0);
-            bytes_sent = send(sock, data, strlen(data)+1, 0);
+        do {
+            bytes_sent = send(sock, (data+total_bytes_sent), strlen(data)+1-total_bytes_sent, 0);
+            // bytes_sent = send(sock, data, strlen(data)+1, 0);
             if (bytes_sent == -1){
                 perror("send");
+                close(sock);
                 exit(1);
             }
             else if (bytes_sent == 0){
                 printf("Connection was closed prior to sending the data!\n");
+                close(sock);
                 exit(1);
             }
-        // } while (bytes_sent > 0);
+            total_bytes_sent += bytes_sent;
+        } while (total_bytes_sent < strlen(data)+1);
 
         printf("Do you want to send the file again?\n");
         printf("0 - No\n1 - Yes\n");
@@ -118,13 +127,15 @@ int main(int argc, char *argv[]){
     }
 
     printf("Sending an exit message to the receiver...\n");
-    bytes_sent = send(sock, EXIT_MESSAGE, strlen(data)+1, 0);
+    bytes_sent = send(sock, EXIT_MESSAGE, strlen(EXIT_MESSAGE)+1, 0);
     if (bytes_sent == -1){
         perror("send");
+        close(sock);
         exit(1);
     }
     else if (bytes_sent == 0){
         printf("Connection was closed prior to sending the data!\n");
+        close(sock);
         exit(1);
     }
 
@@ -150,7 +161,7 @@ char* util_generate_random_data(unsigned int size){
         return NULL;
     }
 
-    buffer = (char*)calloc(size, sizeof(char));
+    buffer = (char*)malloc(size * sizeof(char));
 
     if (buffer == NULL){
         return NULL;
@@ -158,9 +169,11 @@ char* util_generate_random_data(unsigned int size){
 
     srand(time(NULL));
 
-    for (unsigned int i = 0; i < size; i++){
-        *(buffer + i) = ((unsigned int) rand() % 256);
+    for (unsigned int i = 0; i < size-1; i++){
+        // set a random value insidee - make sure the value isn't '\0' that will act as the end of the string
+        while ((*(buffer + i) = ((unsigned int) rand() % 256)) == '\0');
     }
+    buffer[size-1] = '\0';
 
     return buffer;
 }
