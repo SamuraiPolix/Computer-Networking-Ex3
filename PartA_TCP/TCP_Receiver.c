@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
                     algo = "cubic";
                 }
                 else {
-                    fprintf(stderr, "Algo should be \"reno\" or \"cubic\"!");
+                    fprintf(stderr, "Algo should be either reno for TCP Reno or cubic for TCP Cubic!\n");
                     exit(1);
                 }
                 // Set algo
