@@ -1,5 +1,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h> 
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
@@ -9,21 +10,25 @@
 
 #define _DEBUG
 
-#define EXIT_MESSAGE "EXIT"
+#define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
 
-#define SERVER_PORT 6000
-#define SERVER_IP "127.0.0.1"
-#define MIN_FILE_SIZE 2097152           // 2MB
+// #define SERVER_PORT 6000
+// #define SERVER_IP "127.0.0.1"
+
+#define MB 1048576
+#define MIN_FILE_SIZE 2*MB           // 2MB
+
 
 char* util_generate_random_data(unsigned int size);
 
 int main(int argc, char *argv[]){
     printf("Starting Sender...\n");
 
-    // if (argc != 7){
-    //     fprintf(stderr, "Usage: -ip <server_ip> -p <server_port> -algo <algo>");
-    //     exit(1);
-    // }
+    // Check the correct amount of args were received
+    if (argc != 7){
+        fprintf(stderr, "Usage: -ip <server_ip> -p <server_port> -algo <algo>");
+        exit(1);
+    }
 
     int sock = -1;
     sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -38,47 +43,57 @@ int main(int argc, char *argv[]){
     memset(&server, 0, sizeof(server));
 
     server.sin_family = AF_INET;
-    server.sin_port = htons(SERVER_PORT);
 
-    if (inet_pton(AF_INET, SERVER_IP, &(server.sin_addr)) <= 0){
-        perror("inet_pton");
-        close(sock);
-        exit(1);
+    int i = 1;
+    // Take port, ip and algo from argv (if failed - stop program and ask for correct inputs)
+    while (i < argc){
+        if (argv[i][0] == '-') {
+            if (!strcmp(argv[i], "-algo")){
+                // Set TCP congestion control algorithm
+                const char *algo;       // "reno" or "cubic"
+                i++;
+                if (!strcmp(argv[i], "reno")){
+                    algo = "reno";
+                }
+                else if (!strcmp(argv[i], "cubic")){
+                    algo = "cubic";
+                }
+                else {
+                    fprintf(stderr, "Algo should be \"reno\" or \"cubic\"!");
+                    exit(1);
+                }
+                // Set algo
+                #ifdef _DEBUG
+                printf("Algo is set to: %s\n", algo);
+                #endif
+                if (setsockopt(sock, IPPROTO_TCP, TCP_CONGESTION, algo, strlen(algo)) < 0) {
+                    perror("setsockopt");
+                    close(sock);
+                    exit(1);
+                }
+            }
+            else if (!strcmp(argv[i], "-p")){
+                // Set server port
+                i++;
+                server.sin_port = htons(atoi(argv[i]));
+                #ifdef _DEBUG
+                printf("Server Port is set to: %d\n", atoi(argv[i]));
+                #endif
+            }
+            else if (!strcmp(argv[i], "-ip")){
+                // Set server ip
+                i++;
+                if (inet_pton(AF_INET, argv[i], &(server.sin_addr)) <= 0){
+                    perror("inet_pton");
+                    exit(1);
+                }
+                #ifdef _DEBUG
+                printf("Server IP is set to: %s\n", argv[i]);
+                #endif
+            }
+        }
+        i++;
     }
-
-
-    // int i = 0;
-    // Take port and ip from argv (if failed - use defaults)
-    // while (i < argc){
-    //     if (argv[i][0] == '-') {
-    //         if (!strcmp(argv[i], "-algo")){
-    //             i++;
-    //             if (!strcmp(argv[i], "reno")){
-
-    //             }
-    //             else if (!strcmp(argv[i], "cubic")){
-
-    //             }
-    //             else {
-    //                 fprintf(stderr, "Algo can be either reno for TCP Reno or cubic for TCP Cubic");
-    //                 exit(1);
-    //             }
-    //         }
-    //         else if (!strcmp(argv[i], "-p")){
-    //             i++;
-    //             server.sin_port = htons(*argv[i]);
-    //         }
-    //         else if (!strcmp(argv[i], "-ip")){
-    //             i++;
-    //             if (inet_pton(AF_INET, SERVER_IP, &(server.sin_addr)) <= 0){
-    //                 perror("inet_pton");
-    //                 exit(1);
-    //             }
-    //         }
-    //     }
-    //     i++;
-    // }
-    
 
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) == -1){
         perror("connect");
@@ -87,55 +102,115 @@ int main(int argc, char *argv[]){
     }
 
     // Generate random data
-    printf("Generating random data, of at least %dMB in size...\n", MIN_FILE_SIZE);
-    char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
+    // printf("Generating random data, of at least %dMB in size...\n", MIN_FILE_SIZE/MB);
+    // char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
+
+    // Specify the file path
+    const char* file_path = "numbers.txt";
+
+    // Open the file in binary mode ("rb" for read binary)
+    FILE* file = fopen(file_path, "rb");
+    
+    if (file == NULL) {
+        perror("Error opening file");
+        return 1;
+    }
+
+    // Seek to the end of the file to determine its size
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    // Allocate memory for the entire content of the file
+    char *data = (char*)malloc(file_size + 1);
+
+    if (data == NULL) {
+        perror("Memory allocation error");
+        fclose(file);
+        return 1;
+    }
+
+    // Read the entire file into memory
+    fread(data, 1, file_size, file);
+
+    // Null-terminate the content to make it a valid C string
+    data[file_size] = '\0';
+
+    // Close the file
+    fclose(file);
+
+    // Print or use the file content as needed
+    printf("File content:\n%s\n", data);
 
     // FILE * f = fopen ("file.txt", "rb");
     // data = NULL;
     // size_t len;
     // ssize_t bytes_read = getdelim( &data, &len, '\0', f);
-    #ifdef _DEBUG
-    printf("Data generated: %s", data);
-    #endif
+    // #ifdef _DEBUG
+    // printf("Data generated: %s", data);
+    // #endif
 
     int bytes_sent, total_bytes_sent;
-    unsigned short action = 1;
+    int packet_size;
+    char action;
 
-    while (action == 1) {
+    do {
         printf("Sending the data...\n");
         bytes_sent = total_bytes_sent = 0;
-        // TODO: understand how to resend bytes that went missing
-        do {
-            bytes_sent = send(sock, (data+total_bytes_sent), strlen(data)+1-total_bytes_sent, 0);
-            // bytes_sent = send(sock, data, strlen(data)+1, 0);
-            if (bytes_sent == -1){
-                perror("send");
-                close(sock);
-                exit(1);
-            }
-            else if (bytes_sent == 0){
-                printf("Connection was closed prior to sending the data!\n");
-                close(sock);
-                exit(1);
-            }
-            total_bytes_sent += bytes_sent;
-        } while (total_bytes_sent < strlen(data)+1);
+        // do {
+        // Send the size of the file so the receiver is prepared to receive all the bytes
+        packet_size = strlen(data)+1;
+        bytes_sent = send(sock, &packet_size, sizeof packet_size, 0);
+        // Send data
+        bytes_sent = send(sock, data, strlen(data)+1, 0);
+        #ifdef _DEBUG
+        printf("Sent data size: %d bytes.\n", bytes_sent);
+        #endif
+        if (bytes_sent == -1){
+            perror("send");
+            close(sock);
+            free(data);
+            exit(1);
+        }
+        else if (bytes_sent == 0){
+            printf("Connection was closed prior to sending the data!\n");
+            close(sock);
+            free(data);
+            exit(1);
+        }
 
         printf("Do you want to send the file again?\n");
-        printf("0 - No\n1 - Yes\n");
-        scanf("%hu", &action);
-    }
+        printf("N - No\nY - Yes\n");
+        // Get chars until one of the following: y,Y,n,N is received
+        while (1){
+            action = getchar();
+            if (action != '\n'){
+                if (action != 'y' && action != 'n' && action != 'Y' && action != 'N' )
+                    printf("Incorrect selection! Enter:\nN - NO\nY - Yes\n");
+                else
+                    break;      // good input was received
+            }
+        }
+        // Resend if received "yes"
+    } while(action == 'y' || action == 'Y');
 
+    total_bytes_sent = 0;
     printf("Sending an exit message to the receiver...\n");
-    bytes_sent = send(sock, EXIT_MESSAGE, strlen(EXIT_MESSAGE)+1, 0);
+    /*
+    We notify the Receiver of an EXIT MESSAGE by preparing him to receive 0 bytes.
+    */
+    bytes_sent = send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0);
+
     if (bytes_sent == -1){
         perror("send");
         close(sock);
+        free(data);
         exit(1);
     }
     else if (bytes_sent == 0){
         printf("Connection was closed prior to sending the data!\n");
         close(sock);
+        free(data);
         exit(1);
     }
 
@@ -144,7 +219,8 @@ int main(int argc, char *argv[]){
     printf("Closing the TCP connection...\n");
     close(sock);
 
-    printf("Sender end.");
+    printf("Sender end.\n");
+    free(data);
 
     return 0;
 }

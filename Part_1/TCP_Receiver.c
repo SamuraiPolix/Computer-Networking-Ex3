@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <netinet/tcp.h> 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -10,15 +11,15 @@
 
 #define _DEBUG
 
-#define EXIT_MESSAGE "EXIT"
+#define EXIT_MESSAGE 0
 
-#define SERVER_PORT 6000        // The port the server is listening on
+// #define SERVER_PORT 6000        // The port the server is listening on
 #define CLIENTS 1           // Max allowed clients at once
-#define MAX_RUNS 100000
+#define MAX_RUNS 10000
 #define MB 1048576
 struct
 {
-    unsigned int id;            // Run number #_
+    unsigned int id;            // Run number #X
     float elapsed_time;         // time it took to receive data
     float speed;           // speed in MB/s
 } runs[MAX_RUNS];           // runs[0] keeps the avg of all runs
@@ -26,6 +27,13 @@ struct
 
 int main(int argc, char *argv[]) {
     printf("Starting Receiver...\n");
+
+    // Check the correct amount of args were received
+    if (argc != 5){
+        fprintf(stderr, "Usage: -p <server_port> -algo <algo>");
+        exit(1);
+    }
+
     int sock = -1;
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -39,8 +47,47 @@ int main(int argc, char *argv[]) {
     memset(&server, 0, sizeof(server));
 
     server.sin_family = AF_INET;
-    server.sin_port = htons(SERVER_PORT);
     server.sin_addr.s_addr = INADDR_ANY;        // accept connections from any ip
+
+    int i = 1;
+    // Take port, ip and algo from argv (if failed - stop program and ask for correct inputs)
+    while (i < argc){
+        if (argv[i][0] == '-') {
+            if (!strcmp(argv[i], "-algo")){
+                // Set TCP congestion control algorithm
+                const char *algo;; // or "cubic"
+                i++;
+                if (!strcmp(argv[i], "reno")){
+                    algo = "reno";
+                }
+                else if (!strcmp(argv[i], "cubic")){
+                    algo = "cubic";
+                }
+                else {
+                    fprintf(stderr, "Algo should be \"reno\" or \"cubic\"!");
+                    exit(1);
+                }
+                // Set algo
+                #ifdef _DEBUG
+                printf("Algo is set to: %s\n", algo);
+                #endif
+                if (setsockopt(sock, IPPROTO_TCP, TCP_CONGESTION, algo, strlen(algo)) < 0) {
+                    perror("setsockopt");
+                    close(sock);
+                    exit(1);
+                }
+            }
+            else if (!strcmp(argv[i], "-p")){
+                // Set port
+                i++;
+                server.sin_port = htons(atoi(argv[i]));
+                #ifdef _DEBUG
+                printf("Port is set to: %d\n", atoi(argv[i]));
+                #endif
+            }
+        }
+        i++;
+    }
     
     if (bind(sock, (struct sockaddr *)&server, sizeof(server)) == -1){
         close(sock);
@@ -52,6 +99,7 @@ int main(int argc, char *argv[]) {
             if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1){
                 fprintf(stderr, "Couldn't fix the error, Exiting...\n");
                 perror("setsockopt");
+                close(sock);
                 exit(1);
             }
             printf("Error is fixed.\nPlease restart the program!\n");
@@ -81,24 +129,32 @@ int main(int argc, char *argv[]) {
 
     printf("Sender connected, beginning to receive the file...\n");
     int times = 0;       // Save the amount of times data is received
-    // ASK: when do I need to start the time calculation?
     struct timeval start_time, end_time;
 
-    int bytes_received, total_bytes;
-    // int total_bytes_received = 0;
+    int bytes_received, remaining_bytes, total_bytes;
     char buffer[BUFSIZ] = {0};
 
     do {
         times++;
-        // TODO: fix times
+        
+        // Receive the size of the file in bytes (Sender prepares us for the file)
+        bytes_received = recv(sock_client, &remaining_bytes, sizeof remaining_bytes, 0);
+
+        // Check if the received message is an exit message
+        if (remaining_bytes == EXIT_MESSAGE){
+            printf("Sender sent exit message.\n");
+            times--;        // don't count this message in the stats
+            break;      // stop receiving
+        }
+
+        total_bytes = remaining_bytes;
         gettimeofday(&start_time, NULL);        // Log current time, to calculate time later
 
-        // TODO: understand how to receive bytes that went missing. keep receiving if there was no '\0' at the end of the message?
+        // Receive the file
         do {
-            bytes_received = recv(sock_client, buffer, BUFSIZ-1, 0);
-            if (strcmp())
-            // total_bytes_received += bytes_received;
-            if (bytes_received == -1){
+            bytes_received = recv(sock_client, buffer, BUFSIZ, 0);
+            remaining_bytes -= bytes_received;
+            if (bytes_received <= -1){
                 perror("recv");
                 close(sock);
                 exit(1);
@@ -108,14 +164,11 @@ int main(int argc, char *argv[]) {
                 close(sock);
                 exit(1);
             }
-        } while (bytes_received > 0);
+            // keep receiving until the amout of expected bytes is reached
 
-        // Check if the received message is an exit message
-        if (!strcmp(buffer, EXIT_MESSAGE)) {
-            printf("Sender sent exit message.\n");
-            times--;        // don't count this message in the stats
-            break;      // stop receiving
-        }
+        } while (remaining_bytes > 0);
+
+        gettimeofday(&end_time, NULL);
 
         // Makes sure a '\0' exists at the end of the data to not accidently access forbidden memory
         if (buffer[BUFSIZ - 1] != '\0'){
@@ -124,18 +177,19 @@ int main(int argc, char *argv[]) {
 
         // SAVE TO FILE??
 
-        gettimeofday(&end_time, NULL);
-
+        // Add stats
+        struct timeval elapsed;
+        timersub(&end_time, &start_time, &elapsed);
         runs[times].id = times;
-        runs[times].elapsed_time = (end_time.tv_sec - start_time.tv_sec) * 1000.0 + (end_time.tv_usec - start_time.tv_usec) / 1000.0;
-        runs[times].speed = (strlen(buffer)/(float)MB)/(runs[times].elapsed_time/1000.0);
+        runs[times].elapsed_time = elapsed.tv_sec * 1000.0 + elapsed.tv_usec / 1000.0;
+        runs[times].speed = (total_bytes / (float)MB) / (runs[times].elapsed_time / 1000.0);
 
         // runs[0] keeps the avg of all runs. add data to avg:
         runs[0].elapsed_time += runs[times].elapsed_time;
         runs[0].speed += runs[times].speed;
 
         #ifdef _DEBUG
-        printf("Received data size: %ld: %s\n", strlen(buffer), buffer);
+        printf("Received data size: %d bytes.\n", total_bytes);
         #endif
 
         printf("Data transfer completed.\n");
@@ -149,17 +203,19 @@ int main(int argc, char *argv[]) {
     // Close connection
     close(sock);
 
+    // Close the file
+    fclose(file);
 
     // PRINT STATS
 
     printf("----------------------------\n");
     printf("-      * Statistics *      -\n");
 
-    for (int i = 1; i < times; i++){
+    for (int i = 1; i <= times; i++){
         printf("Run #%d Data: Time=%.2fms; Speed=%.2fMB/s\n", runs[i].id, runs[i].elapsed_time, runs[i].speed);
     }
 
-    // divide to get avg
+    // divide by num of runs to get avg
     runs[0].elapsed_time /= times;
     runs[0].speed /= times;
 
@@ -168,5 +224,6 @@ int main(int argc, char *argv[]) {
     printf("----------------------------\n");
     
     printf("Receiver end.\n");
+    
     return 0;
 }
