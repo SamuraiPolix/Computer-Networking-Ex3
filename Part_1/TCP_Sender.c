@@ -30,6 +30,7 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
+    // create a socket, ipv4, tcp type, tcp protocol (chosen automatically)
     int sock = -1;
     sock = socket(AF_INET, SOCK_STREAM, 0);
     
@@ -40,9 +41,10 @@ int main(int argc, char *argv[]){
 
     struct sockaddr_in server;
 
+    // reset address's memory before using it
     memset(&server, 0, sizeof(server));
 
-    server.sin_family = AF_INET;
+    server.sin_family = AF_INET;        // ipv4
 
     int i = 1;
     // Take port, ip and algo from argv (if failed - stop program and ask for correct inputs)
@@ -50,7 +52,7 @@ int main(int argc, char *argv[]){
         if (argv[i][0] == '-') {
             if (!strcmp(argv[i], "-algo")){
                 // Set TCP congestion control algorithm
-                const char *algo;       // "reno" or "cubic"
+                char *algo;       // "reno" or "cubic"
                 i++;
                 if (!strcmp(argv[i], "reno")){
                     algo = "reno";
@@ -95,6 +97,7 @@ int main(int argc, char *argv[]){
         i++;
     }
 
+    // connect to server
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) == -1){
         perror("connect");
         close(sock);
@@ -102,13 +105,12 @@ int main(int argc, char *argv[]){
     }
 
     // Generate random data
-    // printf("Generating random data, of at least %dMB in size...\n", MIN_FILE_SIZE/MB);
-    // char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
+    printf("Generating random data, of at least %dMB in size...\n", MIN_FILE_SIZE/MB);
+    char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
 
-    // Specify the file path
+    /*  USE A FILE WITH INCREASING NUMBER TO MAKE SURE THE DATA IS FULLY RECEIVED
+    // OPEN FILE
     const char* file_path = "numbers.txt";
-
-    // Open the file in binary mode ("rb" for read binary)
     FILE* file = fopen(file_path, "rb");
     
     if (file == NULL) {
@@ -116,13 +118,13 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    // Seek to the end of the file to determine its size
+    // get size of file
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    // Allocate memory for the entire content of the file
-    char *data = (char*)malloc(file_size + 1);
+    // allocate memory for file
+    data = (char*)malloc(file_size + 1);
 
     if (data == NULL) {
         perror("Memory allocation error");
@@ -130,22 +132,17 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    // Read the entire file into memory
+    // read file to data
     fread(data, 1, file_size, file);
 
-    // Null-terminate the content to make it a valid C string
+    // add '\0' at the end to make sure we dont get to forbidden memory
     data[file_size] = '\0';
 
-    // Close the file
+    // close file
     fclose(file);
+    */
 
-    // Print or use the file content as needed
-    printf("File content:\n%s\n", data);
 
-    // FILE * f = fopen ("file.txt", "rb");
-    // data = NULL;
-    // size_t len;
-    // ssize_t bytes_read = getdelim( &data, &len, '\0', f);
     // #ifdef _DEBUG
     // printf("Data generated: %s", data);
     // #endif
@@ -157,15 +154,10 @@ int main(int argc, char *argv[]){
     do {
         printf("Sending the data...\n");
         bytes_sent = total_bytes_sent = 0;
-        // do {
+
         // Send the size of the file so the receiver is prepared to receive all the bytes
         packet_size = strlen(data)+1;
         bytes_sent = send(sock, &packet_size, sizeof packet_size, 0);
-        // Send data
-        bytes_sent = send(sock, data, strlen(data)+1, 0);
-        #ifdef _DEBUG
-        printf("Sent data size: %d bytes.\n", bytes_sent);
-        #endif
         if (bytes_sent == -1){
             perror("send");
             close(sock);
@@ -178,6 +170,25 @@ int main(int argc, char *argv[]){
             free(data);
             exit(1);
         }
+
+        // Send data
+        bytes_sent = send(sock, data, strlen(data)+1, 0);
+        if (bytes_sent == -1){
+            perror("send");
+            close(sock);
+            free(data);
+            exit(1);
+        }
+        else if (bytes_sent == 0){
+            printf("Connection was closed prior to sending the data!\n");
+            close(sock);
+            free(data);
+            exit(1);
+        }
+
+        #ifdef _DEBUG
+        printf("Sent data size: %d bytes.\n", bytes_sent);
+        #endif
 
         printf("Do you want to send the file again?\n");
         printf("N - No\nY - Yes\n");
@@ -197,10 +208,9 @@ int main(int argc, char *argv[]){
     total_bytes_sent = 0;
     printf("Sending an exit message to the receiver...\n");
     /*
-    We notify the Receiver of an EXIT MESSAGE by preparing him to receive 0 bytes.
+    We notify the Receiver of an EXIT MESSAGE by "preparing him" to receive 0 bytes.
     */
-    bytes_sent = send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0);
-
+    bytes_sent = send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0);     // telling him we have 0 bytes to send
     if (bytes_sent == -1){
         perror("send");
         close(sock);
