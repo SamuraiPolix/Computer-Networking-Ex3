@@ -19,10 +19,10 @@
 */
 
 /* 
- * @brief Created an RUDP socket and a handshake between two peers.
+ * @brief Creates an RUDP socket and a handshake between two peers.
  * @param struct sockaddr_in* and the peer type (CLIENT or SERVER);
 */
-int rudp_socket(struct sockaddr_in *my_addr, int peer_type);
+int rudp_socket(struct sockaddr_in *my_addr, int peer_type, int *seq_number);
 
 /* 
  * @brief Sending data to the peer. Waits for an acknowledgement package, if not received, resends the data.
