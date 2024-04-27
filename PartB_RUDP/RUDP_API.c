@@ -65,7 +65,18 @@ typedef struct _rudp_packet {
     char data[RUDP_MAX_PACKET_SIZE - sizeof(rudp_packet_header)];      // data without header
 } rudp_packet;
 
+// Declaring functions
+rudp_packet* create_ack_packet(int ack_number);
+rudp_packet* create_syn_packet(int seq_number);
+rudp_packet* create_ack_syn_packet(int seq_number);
+int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to, int seq_number);
+int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number);
+int rudp_send_syn(int sock_id, struct sockaddr_in *to, int seq_number);
+rudp_packet* create_packet(const void *data, size_t data_size, int seq_ack_number);
+int rudp_recv_syn(int sock, struct sockaddr_in *client_addr);
+int rudp_recv_ack(int sock, struct sockaddr_in *sender_addr);
 
+// Functions
 int rudp_socket(struct sockaddr_in *server_address, int peer_type, int * seq_number)
 {
     int sock = -1;
@@ -126,22 +137,22 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, int * seq_num
     return sock;
 }
 
-int rudp_send(int sock_id, const void *data, size_t data_size, struct sockaddr_in *to, uint8_t seq_number)
+int rudp_send(int sock_id, const void *data, size_t data_size, int flags, struct sockaddr_in *to, uint8_t seq_number)
 {
     // create rudp simple packet
     rudp_packet* packet = create_packet(data, data_size, seq_number);
 
-    rudp_send_packet(packet, sock_id, to, seq_number);
+    int status = rudp_send_packet(packet, sock_id, to, seq_number);
 
-    return 0;
+    return status;
 }
 
-int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to, uint8_t seq_number){
+int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to, int seq_number){
     int bytes_sent;
     // send packet
     
     do {
-        bytes_sent = sendto(sock_id, packet, sizeof(packet), 0, (struct sockaddr *)&to, sizeof(to));
+        bytes_sent = sendto(sock_id, packet, sizeof(packet), 0, (struct sockaddr *) to, sizeof(*to));
         if (bytes_sent == -1){
             perror("sendto");
             close(sock_id);
@@ -163,7 +174,7 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to, u
     return SUCCESS;
 }
 
-int rudp_send_ack(int sock_id, struct sockaddr_in *to, uint8_t seq_number){
+int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number){
     // create rudp ack packet
     
     rudp_packet* ack_packet = create_ack_packet(seq_number);
@@ -171,7 +182,7 @@ int rudp_send_ack(int sock_id, struct sockaddr_in *to, uint8_t seq_number){
     return rudp_send_packet(ack_packet, sock_id, to, seq_number);
 }
 
-int rudp_send_syn(int sock_id, struct sockaddr_in *to, uint8_t seq_number){
+int rudp_send_syn(int sock_id, struct sockaddr_in *to, int seq_number){
     // create rudp ack packet
     
     rudp_packet* syn_packet = create_syn_packet(seq_number);
@@ -179,7 +190,7 @@ int rudp_send_syn(int sock_id, struct sockaddr_in *to, uint8_t seq_number){
     return rudp_send_packet(syn_packet, sock_id, to, seq_number);
 }
 
-rudp_packet* create_ack_packet(uint8_t ack_number){
+rudp_packet* create_ack_packet(int ack_number){
     rudp_packet* ack_packet = create_packet(NULL, 0, ack_number);
     // set NUL flag to 1 -> set ACK flag to 1 - this is an ACK packet; following draft guidelines
     ack_packet->header.flags.nul = 1;
@@ -187,7 +198,7 @@ rudp_packet* create_ack_packet(uint8_t ack_number){
     return ack_packet;
 }
 
-rudp_packet* create_syn_packet(uint8_t seq_number){
+rudp_packet* create_syn_packet(int seq_number){
     rudp_packet* syn_packet = create_packet(NULL, 0, seq_number);
     // set NUL flag to 1 -> set SYN flag to 1 - this is a SYN packet; following draft guidelines
     syn_packet->header.flags.nul = 1;
@@ -195,7 +206,7 @@ rudp_packet* create_syn_packet(uint8_t seq_number){
     return syn_packet;
 }
 
-rudp_packet* create_ack_syn_packet(uint8_t seq_number){
+rudp_packet* create_ack_syn_packet(int seq_number){
     rudp_packet* syn_packet = create_packet(NULL, 0, seq_number);
     syn_packet->header.flags.nul = 1;
     syn_packet->header.flags.syn = 1;
@@ -204,7 +215,7 @@ rudp_packet* create_ack_syn_packet(uint8_t seq_number){
 }
 
 // Doesn't deal with flags - defaults to all 0
-rudp_packet* create_packet(const void *data, size_t data_size, uint8_t seq_ack_number){
+rudp_packet* create_packet(const void *data, size_t data_size, int seq_ack_number){
     rudp_packet* packet = (rudp_packet*) malloc (sizeof(rudp_packet));
 
     if (packet == NULL){
@@ -220,7 +231,7 @@ rudp_packet* create_packet(const void *data, size_t data_size, uint8_t seq_ack_n
     return packet;
 }
 
-rudp_packet* rudp_recv(int sock, struct sockaddr *client_addr){
+rudp_packet* rudp_recv(int sock, struct sockaddr_in *client_addr){
     rudp_packet* packet = (rudp_packet *) malloc (sizeof(rudp_packet));
 
     if (packet == NULL){
@@ -228,16 +239,19 @@ rudp_packet* rudp_recv(int sock, struct sockaddr *client_addr){
         return NULL;
     }
     // TODO is it *packet or packet inside sizeof
-    recvfrom(sock, packet, sizeof(*packet), 0, client_addr, sizeof(*client_addr));
+    recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, sizeof(*client_addr));
 
+    printf("Received packet, SEQ: %d\n", packet->header.seq_ack_number);
     // Send ACK after receiving
+    printf("Sending ACK packet, SEQ: %d\n", packet->header.seq_ack_number+1);
     rudp_send_ack(sock,client_addr,packet->header.seq_ack_number+1);
+    
     // TODO return the data inside and not the packet!
     return packet;
 }
 
 // return the sequence number received
-u_int8_t rudp_recv_syn(int sock, struct sockaddr *client_addr){
+int rudp_recv_syn(int sock, struct sockaddr_in *client_addr){
     rudp_packet* packet = NULL;
 
     // keep receiving packets until receing a packet flagged as SYN
@@ -253,7 +267,7 @@ u_int8_t rudp_recv_syn(int sock, struct sockaddr *client_addr){
 }
 
 // return the sequence number received
-u_int8_t rudp_recv_ack(int sock, struct sockaddr *sender_addr){
+int rudp_recv_ack(int sock, struct sockaddr_in *sender_addr){
     rudp_packet* packet = NULL;
 
     // keep receiving packets until receiving a packet flagged as ACK

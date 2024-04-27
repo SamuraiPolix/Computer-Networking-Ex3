@@ -5,7 +5,7 @@
 
 #define USAGE "-p <server_port>"
 
-#define DEBUG
+#define _DEBUG
 
 #define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
 // #define CLIENTS 1           // Max allowed clients in queue
@@ -24,7 +24,7 @@ int main(int argc, char *argv[]){
     struct sockaddr_in server, client;
     // reset address's memory before using it
     memset(&server, 0, sizeof(server));
-    #ifndef DEBUG
+    #ifndef _DEBUG
     if (argc != 3){
         fprintf(stderr, "Usage: %s", USAGE);
         close(server);
@@ -45,7 +45,7 @@ int main(int argc, char *argv[]){
         }
     }
     #endif
-    #ifdef DEBUG
+    #ifdef _DEBUG
     server.sin_port = htons(2000);
     #endif
 
@@ -54,8 +54,8 @@ int main(int argc, char *argv[]){
     server.sin_addr.s_addr = INADDR_ANY;        // accept connections from any ip
 
     // generate random num as a starting seq number
-    srand(time(NULL));   // Initialization, should only be called once.
-    int seq = rand();      // Returns a pseudo-random integer between 0 and RAND_MAX.
+    srand(time(NULL));
+    int seq = rand();
 
     int sock = rudp_socket((struct sockaddr_in*) &server, SERVER, &seq);
 

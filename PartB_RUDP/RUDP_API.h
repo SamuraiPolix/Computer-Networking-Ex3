@@ -5,6 +5,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define SERVER 1
 #define CLIENT 0
@@ -29,7 +31,7 @@ int rudp_socket(struct sockaddr_in *my_addr, int peer_type, int *seq_number);
  * @param 
  * @return 
 */
-int rudp_send(int sock_id, const void *data, size_t data_size, int flags);
+int rudp_send(int sock_id, const void *data, size_t data_size, int flags, struct sockaddr_in *to, uint8_t seq_number);
 
 /* 
  * @brief Receives data from peer.

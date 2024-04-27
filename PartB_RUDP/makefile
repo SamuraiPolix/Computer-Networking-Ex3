@@ -13,10 +13,10 @@ all: RUDP_Receiver RUDP_Sender
 RUDP_Receiver: RUDP_Receiver.o $(API_OBJECT)
 	$(CC) $(CFLAGS) -o $@ $^
 
-RUDP_Sender: TCP_Sender.o $(API_OBJECT)
+RUDP_Sender: RUDP_Sender.o $(API_OBJECT)
 	$(CC) $(CFLAGS) -o $@ $^
 
-*.o: *.c $(DEPS)
+%.o: %.c $(DEPS)
 	$(CC) $(CFLAGS) -c $@ $^
 
 clean:

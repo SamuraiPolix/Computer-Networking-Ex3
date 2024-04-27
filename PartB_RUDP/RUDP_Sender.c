@@ -13,6 +13,7 @@
 char* util_generate_random_data(unsigned int size);
 
 int main(int argc, char *argv[]){
+    int seq = 0;        // TODO randomize the first seq number
     printf("Starting Sender...\n");
     if (argc != 5){
         fprintf(stderr, "Usage: %s", USAGE);
@@ -25,7 +26,7 @@ int main(int argc, char *argv[]){
     memset(&server, 0, sizeof(server));
 
     // Getting info from main's args into ip and port of server
-    for (int i = 0; i < argc; i += 2){
+    for (int i = 1; i < argc; i += 2){
         if (strcmp(argv[i], "-ip") == 0){
             if (inet_pton(AF_INET, argv[i+1], &(server.sin_addr)) <= 0){
                 perror("inet_pton");
@@ -43,7 +44,7 @@ int main(int argc, char *argv[]){
 
     // generate random num as a starting seq number
     srand(time(NULL));   // Initialization, should only be called once.
-    int seq = rand();      // Returns a pseudo-random integer between 0 and RAND_MAX.
+    seq = rand();      // Returns a pseudo-random integer between 0 and RAND_MAX.
 
 
     int sock = rudp_socket((struct sockaddr_in*) &server, CLIENT, &seq);
@@ -62,7 +63,7 @@ int main(int argc, char *argv[]){
 
         // Send the size of the file so the receiver is prepared to receive all the bytes
         packet_size = strlen(data)+1;
-        bytes_sent = rudp_send(sock, &packet_size, sizeof packet_size, 0);
+        bytes_sent = rudp_send(sock, &packet_size, sizeof packet_size, 0, &server, seq++);
         if (bytes_sent == -1){
             perror("send");
             close(sock);
@@ -77,7 +78,7 @@ int main(int argc, char *argv[]){
         }
 
         // Send data
-        bytes_sent = rudp_send(sock, data, strlen(data)+1, 0);
+        bytes_sent = rudp_send(sock, data, strlen(data)+1, 0, &server, seq++);
         if (bytes_sent == -1){
             perror("send");
             close(sock);
@@ -115,7 +116,7 @@ int main(int argc, char *argv[]){
     /*
     We notify the Receiver of an EXIT MESSAGE by "preparing him" to receive 0 bytes.
     */
-    bytes_sent = rudp_send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0);     // telling him we have 0 bytes to send
+    bytes_sent = rudp_send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0, &server, seq);     // telling him we have 0 bytes to send
     if (bytes_sent == -1){
         perror("send");
         close(sock);
