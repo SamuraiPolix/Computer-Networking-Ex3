@@ -14,7 +14,7 @@
 char* util_generate_random_data(unsigned int size);
 
 int main(int argc, char *argv[]){
-    int seq = 0;        // TODO randomize the first seq number
+    uint8_t seq = 0;        // TODO randomize the first seq number
     printf("Starting Sender...\n");
     #ifndef _DEBUG
     if (argc != 5){
@@ -73,7 +73,7 @@ int main(int argc, char *argv[]){
 
         // Send the size of the file so the receiver is prepared to receive all the bytes
         packet_size = strlen(data)+1;
-        bytes_sent = rudp_send(sock, &packet_size, sizeof packet_size, 0, &server, seq++);
+        bytes_sent = rudp_send(sock, &packet_size, sizeof packet_size, 0, &server, &seq);
         if (bytes_sent == -1){
             perror("send");
             close(sock);
@@ -88,7 +88,8 @@ int main(int argc, char *argv[]){
         }
 
         // Send data
-        bytes_sent = rudp_send(sock, data, strlen(data)+1, 0, &server, seq++);
+
+        bytes_sent = rudp_send(sock, data, strlen(data)+1, 0, &server, &seq);
         if (bytes_sent == -1){
             perror("send");
             close(sock);
@@ -102,6 +103,7 @@ int main(int argc, char *argv[]){
             exit(1);
         }
 
+        
         #ifdef _DEBUG
         printf("Sent data size: %d bytes.\n", bytes_sent);
         #endif
@@ -126,7 +128,7 @@ int main(int argc, char *argv[]){
     /*
     We notify the Receiver of an EXIT MESSAGE by "preparing him" to receive 0 bytes.
     */
-    bytes_sent = rudp_send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0, &server, seq);     // telling him we have 0 bytes to send
+    bytes_sent = rudp_send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0, &server, &seq);     // telling him we have 0 bytes to send
     if (bytes_sent == -1){
         perror("send");
         close(sock);

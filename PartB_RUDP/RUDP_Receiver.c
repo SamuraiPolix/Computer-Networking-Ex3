@@ -55,7 +55,7 @@ int main(int argc, char *argv[]){
 
     // generate random num as a starting seq number
     srand(time(NULL));
-    int seq = rand();
+    uint8_t seq = rand();
 
     int sock = rudp_socket((struct sockaddr_in*) &server, SERVER, &seq);
 
@@ -70,7 +70,7 @@ int main(int argc, char *argv[]){
         times++;
         
         // Receive the size of the file in bytes (Sender prepares us for the file)
-        bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, 0);
+        bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, &client);
 
         // Check if the received message is an exit message
         if (remaining_bytes == EXIT_MESSAGE){
@@ -84,7 +84,7 @@ int main(int argc, char *argv[]){
 
         // Receive the file
         do {
-            bytes_received = rudp_recv(sock, buffer, BUFSIZ, 0);
+            bytes_received = rudp_recv(sock, buffer, BUFSIZ, &client);
             remaining_bytes -= bytes_received;
             if (bytes_received <= -1){
                 perror("recv");

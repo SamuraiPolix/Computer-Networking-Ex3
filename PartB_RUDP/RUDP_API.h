@@ -24,21 +24,21 @@
  * @brief Creates an RUDP socket and a handshake between two peers.
  * @param struct sockaddr_in* and the peer type (CLIENT or SERVER);
 */
-int rudp_socket(struct sockaddr_in *my_addr, int peer_type, int *seq_number);
+int rudp_socket(struct sockaddr_in *my_addr, int peer_type, uint8_t *seq_number);
 
 /* 
  * @brief Sending data to the peer. Waits for an acknowledgement package, if not received, resends the data.
  * @param 
  * @return 
 */
-int rudp_send(int sock_id, const void *data, size_t data_size, int flags, struct sockaddr_in *to, uint8_t seq_number);
+int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct sockaddr_in *to, uint8_t* seq_number);
 
 /* 
  * @brief Receives data from peer.
  * @param 
  * @return 
 */
-// int rudp_recv();
+int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *client_addr);
 
 /* 
  * @brief Closes a connection between peers.
