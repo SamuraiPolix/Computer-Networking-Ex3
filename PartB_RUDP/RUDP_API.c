@@ -55,7 +55,7 @@ typedef struct _rudp_packet_header {
     // uint16_t destination_port;
     uint16_t length;      // 2 bytes unassigned int - length of the data itself, without the RUDP header
     uint16_t checksum;      // 2 bytes unassigned int - used to validate the corectness of the data
-    uint8_t seq_ack_number;    // when sending a packet - seq number is stored here. when sending an ack, the ack number is stored here.
+    uint16_t seq_ack_number;    // when sending a packet - seq number is stored here. when sending an ack, the ack number is stored here.
     flags_bitfield flags;          // 1 byte unassigned int - used to classify the packet (SYN, ACK, etc.)
 
 } rudp_packet_header;
@@ -79,7 +79,7 @@ int rudp_recv_syn(int sock, struct sockaddr_in *client_addr);
 int rudp_recv_ack(int sock, struct sockaddr_in *sender_addr);
 
 // Functions
-int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint8_t * seq_number)
+int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint16_t * seq_number)
 {
     int sock = -1;
 
@@ -121,7 +121,7 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint8_t * seq
         rudp_send_syn(sock, server_address, *seq_number);
         *seq_number += 1;
         // printf("Waiting for ACK...\n");
-        // uint8_t seq = rudp_recv_ack(sock, &server_address);
+        // uint16_t seq = rudp_recv_ack(sock, &server_address);
         // printf("Received ACK.\n");
         printf("Handshake complete!\n");
     } else if (peer_type == SERVER) {
@@ -141,7 +141,7 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint8_t * seq
     return sock;
 }
 
-int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct sockaddr_in *to, uint8_t* seq_number)
+int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct sockaddr_in *to, uint16_t* seq_number)
 {
     int chunk_size, remaining_bytes;
     int total_bytes_sent = 0, bytes_sent;
@@ -150,7 +150,7 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
         remaining_bytes = data_size-total_bytes_sent;
         chunk_size = remaining_bytes < RUDP_MAX_DATA_SIZE ? remaining_bytes : RUDP_MAX_DATA_SIZE;
 
-        if (chunk_size * 100 < total_bytes_sent)
+        if (total_bytes_sent + 2000 > data_size)
             printf(".");
         
         // create rudp simple packet (with current data chunk - total_bytes_sent acts as a pointer)
@@ -194,7 +194,8 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
         }
     } while (packet->header.flags.ack != 1 && rudp_recv_ack(sock_id, to) == FAIL);     // Resend if ack was not received. only if this packet is not an ack
 
-    // TODO add number of tries until timeout?
+    // 1. ACK was received or timedout OR 2. this is an ACK -> free packet
+    free(packet);
 
     return bytes_sent;
 }
@@ -298,7 +299,9 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
         printf("Sending ACK packet, SEQ: %d\n", packet->header.seq_ack_number+1);
         rudp_send_ack(sock, client_addr, packet->header.seq_ack_number+1);
     }
-    
+
+    // Received and send ack -> free packet
+    free(packet);
     return strlen(data);
 }
 
@@ -322,6 +325,9 @@ int rudp_recv_packet(int sock, rudp_packet * packet, size_t packet_size, struct 
         printf("Sending ACK packet, SEQ: %d\n", packet->header.seq_ack_number+1);
         rudp_send_ack(sock,client_addr,packet->header.seq_ack_number+1);
     }
+
+    // Received and send ack -> free packet
+    free(packet);
     
     return strlen(packet->data);
 }

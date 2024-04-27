@@ -14,7 +14,7 @@
 char* util_generate_random_data(unsigned int size);
 
 int main(int argc, char *argv[]){
-    uint8_t seq = 0;        // TODO randomize the first seq number
+    uint16_t seq = 0;        // TODO randomize the first seq number
     printf("Starting Sender...\n");
     #ifndef _DEBUG
     if (argc != 5){

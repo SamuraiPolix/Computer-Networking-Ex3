@@ -55,7 +55,7 @@ int main(int argc, char *argv[]){
 
     // generate random num as a starting seq number
     srand(time(NULL));
-    uint8_t seq = rand();
+    uint16_t seq = rand();
 
     int sock = rudp_socket((struct sockaddr_in*) &server, SERVER, &seq);
 
