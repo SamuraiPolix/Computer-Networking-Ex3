@@ -118,18 +118,20 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, int * seq_num
         printf("Sending SYN request (handshake)...\n");
         rudp_send_syn(sock, server_address, *seq_number);
         *seq_number++;
-        uint8_t seq = rudp_recv_ack(sock, &server_address);
-        printf("Received ACK.\n");
+        // printf("Waiting for ACK...\n");
+        // uint8_t seq = rudp_recv_ack(sock, &server_address);
+        // printf("Received ACK.\n");
         printf("Handshake complete!\n");
     } else if (peer_type == SERVER) {
         struct sockaddr_in client_addr;
         // wait for SYN from client
+        printf("Waiting for SYN request (handshake)...\n");
         *seq_number = rudp_recv_syn(sock, &client_addr);
         printf("Received SYN request (handshake).\n");
         *seq_number++;
         // send ACK back to client
-        printf("Sending ACK...\n");
-        rudp_send_ack(sock, &client_addr, *seq_number);
+        // printf("Sending ACK...\n");
+        // rudp_send_ack(sock, &client_addr, *seq_number);
         printf("Handshake complete!\n");
 
     }
@@ -150,9 +152,8 @@ int rudp_send(int sock_id, const void *data, size_t data_size, int flags, struct
 int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to, int seq_number){
     int bytes_sent;
     // send packet
-    
     do {
-        bytes_sent = sendto(sock_id, packet, sizeof(packet), 0, (struct sockaddr *) to, sizeof(*to));
+        bytes_sent = sendto(sock_id, packet, sizeof(*packet), 0, (struct sockaddr *) to, sizeof(*to));
         if (bytes_sent == -1){
             perror("sendto");
             close(sock_id);
@@ -163,12 +164,8 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to, i
             close(sock_id);
             exit(FAIL);
         }
+    } while (packet->header.flags.ack != 1 && rudp_recv_ack(sock_id, to) == FAIL);     // Resend if ack was not received. only if this packet is not an ack
 
-        // wait for ACK response
-        // TODO remove?
-        sleep(ACK_WAIT_DELAY);
-
-    } while (rudp_recv_ack(sock_id, seq_number) == FAIL);     // Resend if ack was not received
     // TODO add number of tries until timeout?
 
     return SUCCESS;
@@ -238,13 +235,24 @@ rudp_packet* rudp_recv(int sock, struct sockaddr_in *client_addr){
         fprintf(errno, "ERROR: Failed to allocate memory for the packet!\n");
         return NULL;
     }
+    int len = sizeof(struct sockaddr_in);
     // TODO is it *packet or packet inside sizeof
-    recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, sizeof(*client_addr));
+    recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, &len);
 
-    printf("Received packet, SEQ: %d\n", packet->header.seq_ack_number);
-    // Send ACK after receiving
-    printf("Sending ACK packet, SEQ: %d\n", packet->header.seq_ack_number+1);
-    rudp_send_ack(sock,client_addr,packet->header.seq_ack_number+1);
+    char* type;
+
+    if (packet->header.flags.ack == 1)
+        type = "ACK ";
+    else if (packet->header.flags.syn == 1)
+        type = "SYN ";
+    else
+        type = "";
+    printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+    // Send ACK after receiving only if received packet was not ACK or SYN
+    if (packet->header.flags.ack != 1 && !packet->header.flags.syn != 1){
+        printf("Sending ACK packet, SEQ: %d\n", packet->header.seq_ack_number+1);
+        rudp_send_ack(sock,client_addr,packet->header.seq_ack_number+1);
+    }
     
     // TODO return the data inside and not the packet!
     return packet;

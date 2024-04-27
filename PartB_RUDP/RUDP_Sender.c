@@ -7,6 +7,7 @@
 #define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
 #define MB 1048576
 #define MIN_FILE_SIZE 2*MB           // 2MB
+#define _DEBUG
 
 #define USAGE "-ip <server_ip> -p <server_port>"
 
@@ -15,16 +16,17 @@ char* util_generate_random_data(unsigned int size);
 int main(int argc, char *argv[]){
     int seq = 0;        // TODO randomize the first seq number
     printf("Starting Sender...\n");
+    #ifndef _DEBUG
     if (argc != 5){
         fprintf(stderr, "Usage: %s", USAGE);
         exit(1);
     }
-
+    #endif
     struct sockaddr_in server;
 
     // reset address's memory before using it
     memset(&server, 0, sizeof(server));
-
+    #ifndef _DEBUG
     // Getting info from main's args into ip and port of server
     for (int i = 1; i < argc; i += 2){
         if (strcmp(argv[i], "-ip") == 0){
@@ -41,7 +43,15 @@ int main(int argc, char *argv[]){
             exit(1);
         }
     }
+    #endif
 
+    #ifdef _DEBUG
+    server.sin_port = htons(2000);
+    if (inet_pton(AF_INET, "127.0.0.1", &(server.sin_addr)) <= 0){
+                perror("inet_pton");
+                exit(1);
+    }
+    #endif
     // generate random num as a starting seq number
     srand(time(NULL));   // Initialization, should only be called once.
     seq = rand();      // Returns a pseudo-random integer between 0 and RAND_MAX.
