@@ -1,30 +1,12 @@
 #include "RUDP_API.h"
 #include <stdio.h>
 
-#define max(a, b) ((a) > (b) ? (a) : (b))
-
-#define RUDP_MAX_PACKET_SIZE 576        // Sources: RFC 791, RFC 1122, RFC 2460
-
-#define ACK_WAIT_DELAY 2        // waiting time for ack to arrive when sending, in seconds
-
-#define SUCCESS 0
-#define FAIL 1
-
-
-// Declare functions used here
-// TODO
-
 /*
  * This file contain all implementations for the RUDP API functions.
  */
 
-/*
+/* RUDP: (built "on top" of the regular UDP)
     0 1 2 3 4 5 6 7 8            15 16                            31 
-   +-+-+-+-+-+-+-+-+---------------++-+-+-+-+-+-+-+-+---------------+
-   |                               |                                |
-   |             Source            |           Destination          |
-   |              Port             |              Port              |
-   |                               |                                |
    +-+-+-+-+-+-+-+-+---------------++-+-+-+-+-+-+-+-+---------------+
    |                               |                                |
    |              Length           |            Checksum            |
@@ -37,9 +19,14 @@
    +---------------+---------------+
 */
 
-// #define ACK_MASK 64
-// #define CHK_MASK 4
+/*
+ * Defines:
+*/
+#define max(a, b) ((a) > (b) ? (a) : (b))
 
+/*
+ * Structs:
+*/
 // UDP header will be created on top of this
 typedef struct _flags {
     unsigned int syn : 1;       // indicates a sync segment in present
@@ -53,10 +40,8 @@ typedef struct _flags {
 } flags_bitfield;
 
 typedef struct _rudp_packet_header {
-    // uint16_t source_port;
-    // uint16_t destination_port;
-    uint16_t length;      // 2 bytes unassigned int - length of the data itself, without the RUDP header
-    uint16_t checksum;      // 2 bytes unassigned int - used to validate the corectness of the data
+    uint16_t length;      // length of the data itself, without the RUDP header
+    uint16_t checksum;      // used to validate the corectness of the data
     uint16_t seq_ack_number;    // when sending a packet - seq number is stored here. when sending an ack, the ack number is stored here.
     flags_bitfield flags;          // 1 byte unassigned int - used to classify the packet (SYN, ACK, etc.)
 
@@ -67,12 +52,15 @@ typedef struct _rudp_packet {
     char data[RUDP_MAX_PACKET_SIZE - sizeof(rudp_packet_header)];      // data without header
 } rudp_packet;
 
+/*
+ * Static Consts:
+*/
 static const int RUDP_MAX_DATA_SIZE = RUDP_MAX_PACKET_SIZE - sizeof(rudp_packet_header);
 
-// Declaring functions
-rudp_packet* create_ack_packet(int ack_number);
-rudp_packet* create_syn_packet(int seq_number);
-rudp_packet* create_ack_syn_packet(int seq_number);
+/*
+ * Declating Functions:
+*/
+char* get_packet_type(rudp_packet* packet);
 int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to);
 int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number);
 int rudp_send_syn(int sock_id, struct sockaddr_in *to, int seq_number);
@@ -80,7 +68,9 @@ rudp_packet* create_packet(void *data, size_t data_size, int seq_ack_number);
 int rudp_recv_syn(int sock, struct sockaddr_in *client_addr);
 int rudp_recv_ack(int sock, struct sockaddr_in *sender_addr);
 
-// Functions
+/* 
+ * API Functions
+*/
 int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint16_t * seq_number)
 {
     int sock = -1;
@@ -116,30 +106,18 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint16_t * se
         }
     }
 
-    // handshake
+    // Handshake
+    printf("Handshake Started.\n");
     if (peer_type == CLIENT) {
         // send SYN to server
-        printf("Sending SYN request (handshake)...\n");
         rudp_send_syn(sock, server_address, *seq_number);
-        *seq_number += 1;
-        // printf("Waiting for ACK...\n");
-        // uint16_t seq = rudp_recv_ack(sock, &server_address);
-        // printf("Received ACK.\n");
-        printf("Handshake complete!\n");
     } else if (peer_type == SERVER) {
         struct sockaddr_in client_addr;
         // wait for SYN from client
-        printf("Waiting for SYN request (handshake)...\n");
         *seq_number = rudp_recv_syn(sock, &client_addr);
-        // printf("Received SYN request (handshake).\n");
-        *seq_number += 1;;
-        // send ACK back to client
-        // printf("Sending ACK...\n");
-        // rudp_send_ack(sock, &client_addr, *seq_number);
-        printf("Handshake complete!\n");
-
     }
-
+    *seq_number += 1;;
+    printf("Handshake completed!\n");
     return sock;
 }
 
@@ -150,12 +128,10 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
     while (total_bytes_sent < data_size){
         // calculate chunk size
         remaining_bytes = data_size-total_bytes_sent;
+        // spliting large size data into chunks that fit the maximum allowed data size for RUDP
         chunk_size = remaining_bytes < RUDP_MAX_DATA_SIZE ? remaining_bytes : RUDP_MAX_DATA_SIZE-1; // -1 for '\0'
-
-        if (total_bytes_sent + 2000 > data_size)
-            printf(".");
         
-        // create rudp simple packet (with current data chunk - total_bytes_sent acts as a pointer)
+        // create an RUDP simple packet (with current data chunk - total_bytes_sent acts as a pointer)
         rudp_packet* packet = create_packet(data+total_bytes_sent, chunk_size, *seq_number);
 
         // send chunk
@@ -168,102 +144,6 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
     return total_bytes_sent;
 }
 
-int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
-    int bytes_sent;
-    // send packet
-    char* type = "";
-    do {
-        bytes_sent = sendto(sock_id, packet, sizeof(*packet), 0, (struct sockaddr *) to, sizeof(*to));
-        if (bytes_sent == -1){
-            perror("sendto");
-            close(sock_id);
-            exit(FAIL);
-        }
-        else if (bytes_sent == 0){
-            printf("Connection was closed prior to sending the data3!\n");
-            close(sock_id);
-            exit(FAIL);
-        }
-        bytes_sent = packet->header.length;     // actual data size
-        if (packet->header.flags.ack == 1 && packet->header.flags.syn == 1)
-            type = "SYN ACK ";
-        else if (packet->header.flags.ack == 1)
-            type = "ACK ";
-        else if (packet->header.flags.syn == 1)
-            type = "SYN ";
-        else
-            type = "";
-        printf("Sending %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
-        // sleep for ack packet to arrive
-        sleep(0.2);
-    } while (packet->header.flags.ack != 1 && rudp_recv_ack(sock_id, to) == -1);     // Resend if ack was not received. only if this packet is not an ack
-
-    // 1. ACK was received or timedout OR 2. this is an ACK -> free packet
-    free(packet);
-
-    return bytes_sent;
-}
-
-int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number){
-    // create rudp ack packet
-    
-    rudp_packet* ack_packet = create_ack_packet(seq_number);
-
-    return rudp_send_packet(ack_packet, sock_id, to);
-}
-
-int rudp_send_syn(int sock_id, struct sockaddr_in *to, int seq_number){
-    // create rudp syn packet
-    
-    rudp_packet* syn_packet = create_syn_packet(seq_number);
-
-    return rudp_send_packet(syn_packet, sock_id, to);
-}
-
-rudp_packet* create_ack_packet(int ack_number){
-    rudp_packet* ack_packet = create_packet(NULL, 0, ack_number);
-    // set NUL flag to 1 -> set ACK flag to 1 - this is an ACK packet; following draft guidelines
-    ack_packet->header.flags.nul = 1;
-    ack_packet->header.flags.ack = 1;
-    return ack_packet;
-}
-
-rudp_packet* create_syn_packet(int seq_number){
-    rudp_packet* syn_packet = create_packet(NULL, 0, seq_number);
-    // set NUL flag to 1 -> set SYN flag to 1 - this is a SYN packet; following draft guidelines
-    syn_packet->header.flags.nul = 1;
-    syn_packet->header.flags.syn = 1;
-    return syn_packet;
-}
-
-rudp_packet* create_ack_syn_packet(int seq_number){
-    rudp_packet* syn_packet = create_packet(NULL, 0, seq_number);
-    syn_packet->header.flags.nul = 1;
-    syn_packet->header.flags.syn = 1;
-    syn_packet->header.flags.ack = 1;
-    return syn_packet;
-}
-
-// Doesn't deal with flags - defaults to all 0
-rudp_packet* create_packet(void *data, size_t data_size, int seq_ack_number){
-    rudp_packet* packet = (rudp_packet*) malloc (sizeof(rudp_packet));
-
-    if (packet == NULL){
-        fprintf(stderr, "ERROR: Failed to allocate memory for the packet!\n");
-        return NULL;
-    }
-    // prepare memory
-    memset(&packet->header, 0, sizeof(packet->header));
-
-    packet->header.length = data_size;
-    packet->header.seq_ack_number = seq_ack_number;
-
-    // copy data
-    memcpy(packet->data, data, data_size);
-    memcpy(packet->data+data_size, "\0", 1);       // '\0'
-    return packet;
-}
-
 int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *client_addr){
     rudp_packet* packet = (rudp_packet *) malloc (sizeof(rudp_packet));
 
@@ -272,7 +152,6 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
         return 0;
     }
     socklen_t len = sizeof(struct sockaddr_in);
-    // TODO is it *packet or packet inside sizeof
     int bytes = recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, &len);
 
     if (bytes <= -1){
@@ -295,20 +174,14 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
 
     if (data != NULL){
         memcpy(data, packet->data, data_size);
-        memcpy(data+data_size+1, "\0", 1);       // '\0' at the end of the data
+        memcpy(data+data_size-1, "\0", 1);       // '\0' at the end of the data
     }
-    
-    char* type;
 
-    if (packet->header.flags.ack == 1 && packet->header.flags.syn == 1)
-        type = "SYN ACK ";
-    else if (packet->header.flags.ack == 1)
-        type = "ACK ";
-    else if (packet->header.flags.syn == 1)
-        type = "SYN ";
-    else
-        type = "";
+    #ifdef _DEBUG
+    char* type = get_packet_type(packet);
     printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+    #endif
+
     // Send ACK after receiving only if received packet was not ACK
     if (packet->header.flags.ack != 1){
         rudp_send_ack(sock, client_addr, packet->header.seq_ack_number+1);
@@ -321,20 +194,90 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
     return data_size;
 }
 
+void rudp_close(int sock){
+    close(sock);
+}
+
+/*
+ * Helepr Functions
+*/
+int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
+    int bytes_sent;
+    // send packet
+    do {    // while ack not received or timedout
+        bytes_sent = sendto(sock_id, packet, sizeof(*packet), 0, (struct sockaddr *) to, sizeof(*to));
+        if (bytes_sent == -1){
+            perror("sendto");
+            close(sock_id);
+            exit(FAIL);
+        }
+        else if (bytes_sent == 0){
+            printf("Connection was closed prior to sending the data3!\n");
+            close(sock_id);
+            exit(FAIL);
+        }
+        bytes_sent = packet->header.length;     // actual data size
+
+        #ifdef _DEBUG
+        char* type = get_packet_type(packet);
+        printf("Sending %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+        #endif
+
+    } while (packet->header.flags.ack != 1 && rudp_recv_ack(sock_id, to) == -1);     // Resend if ack was not received. only if this packet is not an ack
+
+    // 1. ACK was received or timedout OR 2. this is an ACK -> free packet
+    free(packet);
+
+    return bytes_sent;
+}
+
+int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number){
+    rudp_packet* ack_packet = create_packet(NULL, 0, seq_number);
+    // set NUL flag to 1 -> set ACK flag to 1 - this is an ACK packet; following draft guidelines
+    ack_packet->header.flags.nul = 1;
+    ack_packet->header.flags.ack = 1;
+
+    return rudp_send_packet(ack_packet, sock_id, to);
+}
+
+int rudp_send_syn(int sock_id, struct sockaddr_in *to, int seq_number){
+    rudp_packet* syn_packet = create_packet(NULL, 0, seq_number);
+    // set NUL flag to 1 -> set SYN flag to 1 - this is a SYN packet; following draft guidelines
+    syn_packet->header.flags.nul = 1;
+    syn_packet->header.flags.syn = 1;
+
+    return rudp_send_packet(syn_packet, sock_id, to);
+}
+
+rudp_packet* create_packet(void *data, size_t data_size, int seq_ack_number){
+    rudp_packet* packet = (rudp_packet*) malloc (sizeof(rudp_packet));
+
+    if (packet == NULL){
+        fprintf(stderr, "ERROR: Failed to allocate memory for the packet!\n");
+        return NULL;
+    }
+    // prepare memory - reset all data in allocated memory
+    memset(&packet->header, 0, sizeof(packet->header));
+
+    packet->header.length = data_size;
+    packet->header.seq_ack_number = seq_ack_number;
+
+    // copy data
+    memcpy(packet->data, data, data_size);
+    memcpy(packet->data+data_size-1, "\0", 1);       // '\0'
+    return packet;
+}
+
 int rudp_recv_packet(int sock, rudp_packet * packet, size_t packet_size, struct sockaddr_in *client_addr){
     socklen_t len = sizeof(struct sockaddr_in);
     recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, &len);
-    char* type;
 
-    if (packet->header.flags.ack == 1 && packet->header.flags.syn == 1)
-        type = "SYN ACK ";
-    else if (packet->header.flags.ack == 1)
-        type = "ACK ";
-    else if (packet->header.flags.syn == 1)
-        type = "SYN ";
-    else
-        type = "";
+    #ifdef _DEBUG
+    char* type = get_packet_type(packet);
     printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+    #endif
+    // TODO func to get packet type
+
     int data_size = strlen(packet->data);
 
     // Send ACK after receiving only if received packet was not ACK
@@ -353,7 +296,7 @@ int rudp_recv_syn(int sock, struct sockaddr_in *client_addr){
     if (packet == NULL){
         fprintf(stderr, "MEMORY ALLOCATION ERROR!");
         close(sock);
-        return FAIL;
+        exit(FAIL);
     }
 
     // keep receiving packets until receiving a packet flagged as SYN
@@ -397,6 +340,15 @@ int rudp_recv_ack(int sock, struct sockaddr_in *sender_addr){
     return packet->header.seq_ack_number;
 }
 
-int rudp_close(){
-
+char* get_packet_type(rudp_packet* packet){
+    char* type;
+    if (packet->header.flags.ack == 1 && packet->header.flags.syn == 1)
+        type = "SYN ACK ";
+    else if (packet->header.flags.ack == 1)
+        type = "ACK ";
+    else if (packet->header.flags.syn == 1)
+        type = "SYN ";
+    else
+        type = "";
+    return type;
 }

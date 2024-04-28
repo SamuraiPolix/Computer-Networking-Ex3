@@ -4,15 +4,20 @@
 #include <time.h>
 #include <stdlib.h>
 
-#define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
-#define MB 1048576
+/*
+ * Defines:
+*/
 #define MIN_FILE_SIZE 2*MB           // 2MB
-#define _DEBUG
-
 #define USAGE "-ip <server_ip> -p <server_port>"
 
+/*
+ * Declaring Functions:
+*/
 char* util_generate_random_data(unsigned int size);
 
+/*
+ * Functions:
+*/
 int main(int argc, char *argv[]){
     uint16_t seq = 0;        // TODO randomize the first seq number
     printf("Starting Sender...\n");
@@ -30,13 +35,21 @@ int main(int argc, char *argv[]){
     // Getting info from main's args into ip and port of server
     for (int i = 1; i < argc; i += 2){
         if (strcmp(argv[i], "-ip") == 0){
+            // Set server ip
             if (inet_pton(AF_INET, argv[i+1], &(server.sin_addr)) <= 0){
                 perror("inet_pton");
                 exit(1);
             }
+            #ifdef _DEBUG
+            printf("Server IP is set to: %s\n", argv[i+1]);
+            #endif
         }
         else if (strcmp(argv[i], "-p") == 0){
-            server.sin_port = htons(argv[i+1]);
+            // Set port
+            server.sin_port = htons(atoi(argv[i+1]));
+            #ifdef _DEBUG
+            printf("Port is set to: %d\n", atoi(argv[i+1]));
+            #endif
         }
         else{
             fprintf(stderr, "Incorrect argument! Usage: %s", USAGE);
@@ -64,7 +77,7 @@ int main(int argc, char *argv[]){
     char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
 
     int bytes_sent, total_bytes_sent;
-    int packet_size;
+    int file_size;
     char action;
 
     do {
@@ -72,33 +85,32 @@ int main(int argc, char *argv[]){
         bytes_sent = total_bytes_sent = 0;
 
         // Send the size of the file so the receiver is prepared to receive all the bytes
-        packet_size = strlen(data)+1;
-        bytes_sent = rudp_send(sock, &packet_size, sizeof packet_size, 0, &server, &seq);
+        file_size = strlen(data)+1;
+        bytes_sent = rudp_send(sock, &file_size, sizeof file_size, 0, &server, &seq);
         if (bytes_sent == -1){
             perror("send");
-            close(sock);
+            rudp_close(sock);
             free(data);
             exit(1);
         }
         else if (bytes_sent == 0){
             printf("Connection was closed prior to sending the data!\n");
-            close(sock);
+            rudp_close(sock);
             free(data);
             exit(1);
         }
 
         // Send data
-        // TODO change back to strlen(data)
-        bytes_sent = rudp_send(sock, data, MIN_FILE_SIZE+BUFSIZ, 0, &server, &seq);
+        bytes_sent = rudp_send(sock, data, file_size, 0, &server, &seq);
         if (bytes_sent == -1){
             perror("send");
-            close(sock);
+            rudp_close(sock);
             free(data);
             exit(1);
         }
         else if (bytes_sent == 0){
             printf("Connection was closed prior to sending the data!\n");
-            close(sock);
+            rudp_close(sock);
             free(data);
             exit(1);
         }
@@ -131,13 +143,13 @@ int main(int argc, char *argv[]){
     bytes_sent = rudp_send(sock, &total_bytes_sent, sizeof total_bytes_sent, 0, &server, &seq);     // telling him we have 0 bytes to send
     if (bytes_sent == -1){
         perror("send");
-        close(sock);
+        rudp_close(sock);
         free(data);
         exit(1);
     }
     else if (bytes_sent == 0){
         printf("Connection was closed prior to sending the data!\n");
-        close(sock);
+        rudp_close(sock);
         free(data);
         exit(1);
     }
@@ -145,7 +157,7 @@ int main(int argc, char *argv[]){
     sleep(1);
     
     printf("Closing the RUDP connection...\n");
-    close(sock);
+    rudp_close(sock);
 
     printf("Sender end.\n");
     free(data);

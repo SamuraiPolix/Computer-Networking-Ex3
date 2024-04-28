@@ -8,10 +8,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define _DEBUG
+
+/*
+ * Defines:
+*/
 #define SERVER 1
 #define CLIENT 0
 
+#define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
+#define MB 1048576
 
+#define RUDP_MAX_PACKET_SIZE 576        // Sources: RFC 791, RFC 1122, RFC 2460
+
+#define FAIL 1
+
+/*
+ * API Functions:
+*/
 
 /*
  * This file contain all the fuctions of the RUDP PROTOCOL that need to be implemented by RUDP_API.c,
@@ -45,4 +59,4 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
  * @param 
  * @return 
 */
-// int rudp_close();
+void rudp_close(int sock);

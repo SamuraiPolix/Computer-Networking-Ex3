@@ -3,15 +3,15 @@
 #include <time.h>
 #include <stdlib.h>
 
+/*
+ * Defines:
+*/
 #define USAGE "-p <server_port>"
-
-#define _DEBUG
-
-#define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
-// #define CLIENTS 1           // Max allowed clients in queue
 #define MAX_RUNS 10000
-#define MB 1048576
 
+/*
+ * Strcuts:
+*/
 struct
 {
     unsigned int id;            // Run number #X
@@ -19,6 +19,9 @@ struct
     float speed;           // speed in MB/s
 } runs[MAX_RUNS];           // runs[0] keeps the avg of all runs
 
+/*
+ * Functions:
+*/
 int main(int argc, char *argv[]){
     printf("Starting Receiver...\n");
     struct sockaddr_in server, client;
@@ -27,20 +30,20 @@ int main(int argc, char *argv[]){
     #ifndef _DEBUG
     if (argc != 3){
         fprintf(stderr, "Usage: %s", USAGE);
-        close(server);
-        close(client);
         exit(1);
     }
 
     // Getting info from main's args into ip and port of server
-    for (int i = 0; i < argc; i += 2){
+    for (int i = 1; i < argc; i += 2){
         if (strcmp(argv[i], "-p") == 0){
-            server.sin_port = htons(argv[i+1]);
+            // Set port
+            server.sin_port = htons(atoi(argv[i+1]));
+            #ifdef _DEBUG
+            printf("Port is set to: %d\n", atoi(argv[i+1]));
+            #endif
         }
         else{
             fprintf(stderr, "Incorrect argument! Usage: %s", USAGE);
-            close(server);
-            close(client);
             exit(1);
         }
     }
@@ -69,9 +72,6 @@ int main(int argc, char *argv[]){
     do {
         times++;
 
-        if (times == 2)
-            printf("...");
-        
         // Receive the size of the file in bytes (Sender prepares us for the file)
         bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, &client);
 
@@ -91,12 +91,12 @@ int main(int argc, char *argv[]){
             remaining_bytes -= bytes_received;
             if (bytes_received <= -1){
                 perror("recv");
-                close(sock);
+                rudp_close(sock);
                 exit(1);
             }
             else if (bytes_received == 0){
                 printf("Connection was closed prior to receiving the data1!\n");
-                close(sock);
+                rudp_close(sock);
                 exit(1);
             }
             // Makes sure a '\0' exists at the end of the data to not accidently access forbidden memory - if we print the buffer
@@ -139,7 +139,7 @@ int main(int argc, char *argv[]){
     } while (1);
 
     // Close connection
-    close(sock);
+    rudp_close(sock);
 
     // PRINT STATS
 
