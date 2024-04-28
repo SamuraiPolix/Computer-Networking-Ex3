@@ -68,6 +68,9 @@ int main(int argc, char *argv[]){
 
     do {
         times++;
+
+        if (times == 2)
+            printf("...");
         
         // Receive the size of the file in bytes (Sender prepares us for the file)
         bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, &client);
@@ -92,7 +95,7 @@ int main(int argc, char *argv[]){
                 exit(1);
             }
             else if (bytes_received == 0){
-                printf("Connection was closed prior to receiving the data!\n");
+                printf("Connection was closed prior to receiving the data1!\n");
                 close(sock);
                 exit(1);
             }

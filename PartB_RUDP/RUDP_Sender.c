@@ -54,8 +54,8 @@ int main(int argc, char *argv[]){
     #endif
     // generate random num as a starting seq number
     srand(time(NULL));   // Initialization, should only be called once.
-    seq = rand();      // Returns a pseudo-random integer between 0 and RAND_MAX.
-
+    // seq = rand();      // Returns a pseudo-random integer between 0 and RAND_MAX.
+    seq = 0;
 
     int sock = rudp_socket((struct sockaddr_in*) &server, CLIENT, &seq);
 
@@ -88,8 +88,8 @@ int main(int argc, char *argv[]){
         }
 
         // Send data
-
-        bytes_sent = rudp_send(sock, data, strlen(data)+1, 0, &server, &seq);
+        // TODO change back to strlen(data)
+        bytes_sent = rudp_send(sock, data, MIN_FILE_SIZE+BUFSIZ, 0, &server, &seq);
         if (bytes_sent == -1){
             perror("send");
             close(sock);
@@ -144,7 +144,7 @@ int main(int argc, char *argv[]){
 
     sleep(1);
     
-    printf("Closing the TCP connection...\n");
+    printf("Closing the RUDP connection...\n");
     close(sock);
 
     printf("Sender end.\n");
@@ -169,6 +169,7 @@ char* util_generate_random_data(unsigned int size){
     buffer = (char*)malloc(size * sizeof(char));
 
     if (buffer == NULL){
+        exit(1);
         return NULL;
     }
 
