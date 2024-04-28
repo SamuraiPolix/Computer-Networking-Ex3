@@ -13,13 +13,17 @@
 /*
  * Defines:
 */
+#define RUDP_MAX_PACKET_SIZE 576        // Sources: RFC 791, RFC 1122, RFC 2460
+
+#define MAX_RETRIES 3
+#define TIMEOUT_SEC 2
+#define TIMEOUT_USEC 0
+
 #define SERVER 1
 #define CLIENT 0
 
 #define EXIT_MESSAGE 0      // Exit message is sending 0 as of "we have 0 bytes to send"
 #define MB 1048576
-
-#define RUDP_MAX_PACKET_SIZE 576        // Sources: RFC 791, RFC 1122, RFC 2460
 
 #define FAIL 1
 

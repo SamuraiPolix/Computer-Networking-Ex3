@@ -203,6 +203,7 @@ void rudp_close(int sock){
 */
 int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
     int bytes_sent;
+    int tried = 0;      // count num of tries to get an ack packet back
     // send packet
     do {    // while ack not received or timedout
         bytes_sent = sendto(sock_id, packet, sizeof(*packet), 0, (struct sockaddr *) to, sizeof(*to));
@@ -222,6 +223,19 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
         char* type = get_packet_type(packet);
         printf("Sending %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
         #endif
+
+        // wait for ack
+        struct timeval timeout;
+        timeout.tv_sec = TIMEOUT_SEC;
+        timeout.tv_usec = TIMEOUT_USEC;
+
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(sock_id, &read_fds);
+
+        
+
+        
 
     } while (packet->header.flags.ack != 1 && rudp_recv_ack(sock_id, to) == -1);     // Resend if ack was not received. only if this packet is not an ack
 
