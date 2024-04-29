@@ -15,8 +15,11 @@
 */
 #define RUDP_MAX_PACKET_SIZE 576        // Sources: RFC 791, RFC 1122, RFC 2460
 
-#define MAX_RETRIES 3
-#define TIMEOUT_SEC 2
+// !!! We decided to remove the timeout (its faster this way), so we raised the MAX_RETRIES to give the ack a chance to arrive.
+// !!! t does consume more bandwidth so if thats important we can raise TIMEOUT_USEC to 10000.
+// !!! I tested the speeds with various timeouts and 0 performed the best but we decided to leave this option here
+#define MAX_RETRIES 50
+#define TIMEOUT_SEC 0
 #define TIMEOUT_USEC 0
 
 #define SERVER 1
@@ -56,7 +59,7 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
  * @param 
  * @return 
 */
-int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *client_addr);
+int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *client_addr, uint16_t* seq);
 
 /* 
  * @brief Closes a connection between peers.

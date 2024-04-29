@@ -72,8 +72,12 @@ int main(int argc, char *argv[]){
     do {
         times++;
 
+        if (times == 2){
+            printf("TEST!");
+        }
+
         // Receive the size of the file in bytes (Sender prepares us for the file)
-        bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, &client);
+        bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, &client, &seq);
 
         // Check if the received message is an exit message
         if (remaining_bytes == EXIT_MESSAGE){
@@ -87,8 +91,10 @@ int main(int argc, char *argv[]){
 
         // Receive the file
         do {
-            bytes_received = rudp_recv(sock, buffer, BUFSIZ, &client);
+            bytes_received = rudp_recv(sock, buffer, BUFSIZ, &client, &seq);
+            printf("Bytes received: %d\n", bytes_received);
             remaining_bytes -= bytes_received;
+            printf("Remaining received: %d\n", remaining_bytes);
             if (bytes_received <= -1){
                 perror("recv");
                 rudp_close(sock);

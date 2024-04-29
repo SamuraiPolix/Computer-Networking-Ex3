@@ -23,6 +23,7 @@
  * Defines:
 */
 #define max(a, b) ((a) > (b) ? (a) : (b))
+#define min(a, b) ((a) > (b) ? (a) : (b))
 
 /*
  * Structs:
@@ -44,7 +45,6 @@ typedef struct _rudp_packet_header {
     uint16_t checksum;      // used to validate the corectness of the data
     uint16_t seq_ack_number;    // when sending a packet - seq number is stored here. when sending an ack, the ack number is stored here.
     flags_bitfield flags;          // 1 byte unassigned int - used to classify the packet (SYN, ACK, etc.)
-
 } rudp_packet_header;
 
 typedef struct _rudp_packet {
@@ -116,7 +116,7 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint16_t * se
         // wait for SYN from client
         *seq_number = rudp_recv_syn(sock, &client_addr);
     }
-    *seq_number += 1;;
+    *seq_number += 1;
     printf("Handshake completed!\n");
     return sock;
 }
@@ -125,17 +125,21 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
 {
     int chunk_size, remaining_bytes;
     int total_bytes_sent = 0, bytes_sent;
+    printf("Total packets needed: %d\n", data_size/RUDP_MAX_DATA_SIZE+1);
     while (total_bytes_sent < data_size){
         // calculate chunk size
         remaining_bytes = data_size-total_bytes_sent;
+        printf("Remaining received: %d\n", remaining_bytes);
         // spliting large size data into chunks that fit the maximum allowed data size for RUDP
-        chunk_size = remaining_bytes < RUDP_MAX_DATA_SIZE ? remaining_bytes : RUDP_MAX_DATA_SIZE-1; // -1 for '\0'
+        chunk_size = remaining_bytes < RUDP_MAX_DATA_SIZE ? remaining_bytes : RUDP_MAX_DATA_SIZE; // -1 for '\0'
         
         // create an RUDP simple packet (with current data chunk - total_bytes_sent acts as a pointer)
         rudp_packet* packet = create_packet(data+total_bytes_sent, chunk_size, *seq_number);
 
         // send chunk
         bytes_sent = rudp_send_packet(packet, sock_id, to);     // actual bytes - data witout header
+
+        printf("Bytes sent: %d\n", bytes_sent);
         
         total_bytes_sent += bytes_sent;
         *seq_number += 1;
@@ -144,7 +148,7 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
     return total_bytes_sent;
 }
 
-int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *client_addr){
+int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *client_addr, uint16_t* seq){
     rudp_packet* packet = (rudp_packet *) malloc (sizeof(rudp_packet));
 
     if (packet == NULL){
@@ -152,29 +156,34 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
         return 0;
     }
     socklen_t len = sizeof(struct sockaddr_in);
-    int bytes = recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, &len);
 
-    if (bytes <= -1){
-        perror("recv");
-        close(sock);
-        exit(1);
-    }
-    else if (bytes == 0){
-        printf("Connection was closed prior to receiving the data4!\n");
-        close(sock);
-        exit(1);
-    }
+    do{
+        int bytes = recvfrom(sock, packet, sizeof(*packet), 0, (struct sockaddr *) client_addr, &len);
 
-    if (packet->header.length > data_size){
-        fprintf(stderr, " ERROR!\n");
-        // TODO: deal with error
-    }
+        if (bytes <= -1){
+            perror("recv");
+            close(sock);
+            exit(1);
+        }
+        else if (bytes == 0){
+            printf("Connection was closed prior to receiving the data4!\n");
+            close(sock);
+            exit(1);
+        }
+    } while (packet->header.flags.syn == 1 || *seq != packet->header.seq_ack_number);        // if by accident a syn was given or seq doesnt match - ignore it and keep receiving
+    *seq += 1;
+    // if (packet->header.length > data_size){
+    //     printf("seq: %d, data: %s", packet->header.seq_ack_number, packet->data);
+    //     fprintf(stderr, " ERROR! %d, %ld\n", packet->header.length, data_size);
+    //     // TODO: deal with error
+    // }
 
     data_size = packet->header.length;
 
     if (data != NULL){
+        // printf("%d, %d, %d", strlen(data), data_size);
         memcpy(data, packet->data, data_size);
-        memcpy(data+data_size-1, "\0", 1);       // '\0' at the end of the data
+        // memcpy(data+data_size-1, "\0", 1);       // '\0' at the end of the data
     }
 
     #ifdef _DEBUG
@@ -189,7 +198,6 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
 
     // Received and send ack -> free packet
     free(packet);
-
     
     return data_size;
 }
@@ -201,19 +209,21 @@ void rudp_close(int sock){
 /*
  * Helepr Functions
 */
-int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
+int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
     int bytes_sent;
-    int tried = 0;      // count num of tries to get an ack packet back
-    // send packet
-    do {    // while ack not received or timedout
+    int tries = 0;      // count num of tries to get an ack packet back
+
+    // Send packet
+    do {    // while ACK not received or timed out
+        printf("Try #%d\n", tries+1);
+        tries++;
         bytes_sent = sendto(sock_id, packet, sizeof(*packet), 0, (struct sockaddr *) to, sizeof(*to));
-        if (bytes_sent == -1){
+        if (bytes_sent == -1) {
             perror("sendto");
             close(sock_id);
             exit(FAIL);
-        }
-        else if (bytes_sent == 0){
-            printf("Connection was closed prior to sending the data3!\n");
+        } else if (bytes_sent == 0) {
+            printf("Connection was closed prior to sending the data!\n");
             close(sock_id);
             exit(FAIL);
         }
@@ -224,26 +234,53 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to){
         printf("Sending %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
         #endif
 
-        // wait for ack
-        struct timeval timeout;
-        timeout.tv_sec = TIMEOUT_SEC;
-        timeout.tv_usec = TIMEOUT_USEC;
+        // Wait for new packet - ACK if sent packet was data or SYN, and data if sent packet was ACK
+        if (packet->header.flags.ack != 1) {
+            // Check if ACK received
+            struct timeval timeout;
+            timeout.tv_sec = TIMEOUT_SEC;
+            timeout.tv_usec = TIMEOUT_USEC;
 
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(sock_id, &read_fds);
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sock_id, &read_fds);
 
-        
-
-        
-
-    } while (packet->header.flags.ack != 1 && rudp_recv_ack(sock_id, to) == -1);     // Resend if ack was not received. only if this packet is not an ack
-
-    // 1. ACK was received or timedout OR 2. this is an ACK -> free packet
-    free(packet);
+            int ready = select(sock_id + 1, &read_fds, NULL, NULL, &timeout);
+            if (ready == -1) {
+                perror("select");
+                close(sock_id);
+                exit(FAIL);
+            } else if (ready == 0) {
+                // Timeout occurred
+                printf("Timeout occurred while waiting for acknowledgment, resending packet\n");
+                continue;       // resend
+            } else {
+                // Check ACK received
+                int seq = rudp_recv_ack(sock_id, to);
+                if (seq == -1 || seq != packet->header.seq_ack_number+1) {
+                    // Retry (if max tries not reached) or exit with failure
+                    // tries++;
+                    // if (tries >= MAX_RETRIES) {
+                    //     perror("recvfrom");
+                    //     close(sock_id);
+                    //     exit(FAIL);
+                    // }
+                    continue;   // resend
+                } else {
+                    // ACK was received
+                    break;
+                    // Make sure the ACK is with the seq number matching our packet
+                }
+            }
+        }
+        else{
+            break;
+        }
+    } while (tries < MAX_RETRIES);     // Resend if ACK was not received. Only if this packet is not an ACK
 
     return bytes_sent;
 }
+
 
 int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number){
     rudp_packet* ack_packet = create_packet(NULL, 0, seq_number);
@@ -278,7 +315,7 @@ rudp_packet* create_packet(void *data, size_t data_size, int seq_ack_number){
 
     // copy data
     memcpy(packet->data, data, data_size);
-    memcpy(packet->data+data_size-1, "\0", 1);       // '\0'
+    // memcpy(packet->data+data_size-1, "\0", 1);       // '\0'
     return packet;
 }
 
@@ -290,9 +327,8 @@ int rudp_recv_packet(int sock, rudp_packet * packet, size_t packet_size, struct 
     char* type = get_packet_type(packet);
     printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
     #endif
-    // TODO func to get packet type
 
-    int data_size = strlen(packet->data);
+    int data_size = packet->header.length;
 
     // Send ACK after receiving only if received packet was not ACK
     if (packet->header.flags.ack != 1){
@@ -320,12 +356,12 @@ int rudp_recv_syn(int sock, struct sockaddr_in *client_addr){
             return -1;        // FAIL
         }
     } while (packet->header.flags.syn != 1 );
-    // TODO add timeout?
 
+    int seq = packet->header.seq_ack_number;
     // Received and sent ack if needed -> free packet
     free(packet);
 
-    return packet->header.seq_ack_number;
+    return seq;
 }
 
 // return the sequence number received
@@ -346,12 +382,12 @@ int rudp_recv_ack(int sock, struct sockaddr_in *sender_addr){
             return -1;        // FAIL
         }
     } while (packet->header.flags.ack != 1);
-    // TODO add timeout?
 
+    int seq = packet->header.seq_ack_number;
     // Received and sent ack if needed -> free packet
     free(packet);
 
-    return packet->header.seq_ack_number;
+    return seq;
 }
 
 char* get_packet_type(rudp_packet* packet){
