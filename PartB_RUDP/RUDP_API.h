@@ -18,8 +18,8 @@
 // !!! We decided to remove the timeout (its faster this way), so we raised the MAX_RETRIES to give the ack a chance to arrive.
 // !!! t does consume more bandwidth so if thats important we can raise TIMEOUT_USEC to 10000.
 // !!! I tested the speeds with various timeouts and 0 performed the best but we decided to leave this option here
-#define MAX_RETRIES 50
-#define TIMEOUT_SEC 0
+#define MAX_RETRIES 25
+#define TIMEOUT_SEC 1000
 #define TIMEOUT_USEC 0
 
 #define SERVER 1

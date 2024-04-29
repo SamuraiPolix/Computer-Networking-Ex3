@@ -60,6 +60,7 @@ static const int RUDP_MAX_DATA_SIZE = RUDP_MAX_PACKET_SIZE - sizeof(rudp_packet_
 /*
  * Declating Functions:
 */
+unsigned short int calculate_checksum(void *data, unsigned int bytes);
 char* get_packet_type(rudp_packet* packet);
 int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to);
 int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number);
@@ -125,11 +126,15 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
 {
     int chunk_size, remaining_bytes;
     int total_bytes_sent = 0, bytes_sent;
-    printf("Total packets needed: %d\n", data_size/RUDP_MAX_DATA_SIZE+1);
+    printf("Total packets needed: %ld\n", (data_size/RUDP_MAX_DATA_SIZE)+1);
     while (total_bytes_sent < data_size){
         // calculate chunk size
         remaining_bytes = data_size-total_bytes_sent;
-        printf("Remaining received: %d\n", remaining_bytes);
+
+        #ifdef _DEBUG
+        printf("Remaining to send: %d\n", remaining_bytes);
+        #endif
+
         // spliting large size data into chunks that fit the maximum allowed data size for RUDP
         chunk_size = remaining_bytes < RUDP_MAX_DATA_SIZE ? remaining_bytes : RUDP_MAX_DATA_SIZE; // -1 for '\0'
         
@@ -139,8 +144,10 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
         // send chunk
         bytes_sent = rudp_send_packet(packet, sock_id, to);     // actual bytes - data witout header
 
+        #ifdef _DEBUG
         printf("Bytes sent: %d\n", bytes_sent);
-        
+        #endif
+
         total_bytes_sent += bytes_sent;
         *seq_number += 1;
     }
@@ -170,30 +177,24 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
             close(sock);
             exit(1);
         }
-    } while (packet->header.flags.syn == 1 || *seq != packet->header.seq_ack_number);        // if by accident a syn was given or seq doesnt match - ignore it and keep receiving
+
+        #ifdef _DEBUG
+        char* type = get_packet_type(packet);
+        printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+        #endif
+        // if by accident a syn was given -OR- seq doesnt match -OR- checksum doesnt match === wrong packet, ignore it and keep receiving
+    } while ((packet->header.flags.syn == 1) || (*seq != packet->header.seq_ack_number ) || (packet->header.checksum != calculate_checksum(packet->data, sizeof(packet->data))));
     *seq += 1;
-    // if (packet->header.length > data_size){
-    //     printf("seq: %d, data: %s", packet->header.seq_ack_number, packet->data);
-    //     fprintf(stderr, " ERROR! %d, %ld\n", packet->header.length, data_size);
-    //     // TODO: deal with error
-    // }
-
-    data_size = packet->header.length;
-
-    if (data != NULL){
-        // printf("%d, %d, %d", strlen(data), data_size);
-        memcpy(data, packet->data, data_size);
-        // memcpy(data+data_size-1, "\0", 1);       // '\0' at the end of the data
-    }
-
-    #ifdef _DEBUG
-    char* type = get_packet_type(packet);
-    printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
-    #endif
 
     // Send ACK after receiving only if received packet was not ACK
     if (packet->header.flags.ack != 1){
         rudp_send_ack(sock, client_addr, packet->header.seq_ack_number+1);
+    }
+
+    data_size = packet->header.length;
+
+    if (data != NULL){
+        memcpy(data, packet->data, data_size);
     }
 
     // Received and send ack -> free packet
@@ -215,7 +216,10 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
 
     // Send packet
     do {    // while ACK not received or timed out
+        #ifdef _DEBUG
         printf("Try #%d\n", tries+1);
+        #endif
+
         tries++;
         bytes_sent = sendto(sock_id, packet, sizeof(*packet), 0, (struct sockaddr *) to, sizeof(*to));
         if (bytes_sent == -1) {
@@ -252,24 +256,19 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
                 exit(FAIL);
             } else if (ready == 0) {
                 // Timeout occurred
+                #ifdef _DEBUG
                 printf("Timeout occurred while waiting for acknowledgment, resending packet\n");
+                #endif
                 continue;       // resend
             } else {
                 // Check ACK received
                 int seq = rudp_recv_ack(sock_id, to);
                 if (seq == -1 || seq != packet->header.seq_ack_number+1) {
-                    // Retry (if max tries not reached) or exit with failure
-                    // tries++;
-                    // if (tries >= MAX_RETRIES) {
-                    //     perror("recvfrom");
-                    //     close(sock_id);
-                    //     exit(FAIL);
-                    // }
+                    // ack doesnt match seq
                     continue;   // resend
                 } else {
-                    // ACK was received
+                    // a good ACK was received
                     break;
-                    // Make sure the ACK is with the seq number matching our packet
                 }
             }
         }
@@ -277,6 +276,9 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
             break;
         }
     } while (tries < MAX_RETRIES);     // Resend if ACK was not received. Only if this packet is not an ACK
+
+    if (tries == MAX_RETRIES)
+        exit(1);
 
     return bytes_sent;
 }
@@ -315,7 +317,7 @@ rudp_packet* create_packet(void *data, size_t data_size, int seq_ack_number){
 
     // copy data
     memcpy(packet->data, data, data_size);
-    // memcpy(packet->data+data_size-1, "\0", 1);       // '\0'
+    packet->header.checksum = calculate_checksum(packet->data, sizeof(packet->data));
     return packet;
 }
 
@@ -401,4 +403,33 @@ char* get_packet_type(rudp_packet* packet){
     else
         type = "";
     return type;
+}
+
+/*
+* @brief A checksum function that returns 16 bit checksum for data.
+* @param data The data to do the checksum for.
+* @param bytes The length of the data in bytes.
+* @return The checksum itself as 16 bit unsigned number.
+* @note This function is taken from RFC1071, can be found here:
+* @note https://tools.ietf.org/html/rfc1071
+* @note It is the simplest way to calculate a checksum and is not very strong.
+* However, it is good enough for this assignment.
+* @note You are free to use any other checksum function as well.
+* You can also use this function as such without any change.
+*/
+unsigned short int calculate_checksum(void *data, unsigned int bytes) {
+    unsigned short int *data_pointer = (unsigned short int *)data;
+    unsigned int total_sum = 0;
+    // Main summing loop
+    while (bytes > 1) {
+    total_sum += *data_pointer++;
+    bytes -= 2;
+    }
+    // Add left-over byte, if any
+    if (bytes > 0)
+    total_sum += *((unsigned char *)data_pointer);
+    // Fold 32-bit sum to 16 bits
+    while (total_sum >> 16)
+    total_sum = (total_sum & 0xFFFF) + (total_sum >> 16);
+    return (~((unsigned short int)total_sum));
 }
