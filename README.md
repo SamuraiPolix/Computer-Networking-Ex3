@@ -3,12 +3,12 @@
 ### - Implementing a simple Reliable UDP (RUDP)
   - Designing packets (header and data)
   - Splitting large data into chunks
+  - Adding reliability with a handshake to start connection, ACK packets, and checksum
+  - Simple API
 ### - Transferring large files over TCP or RUDP
 ### - Simulating packet loss in order to:
   - Compare TCP Reno and TCP Cubic
   - Compare TCP and RUDP
-### - Simple API
-
 
 ## Example runs:
 
