@@ -338,6 +338,8 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
         exit(FAIL);
     }
 
+    free(packet);
+
 
     return bytes_sent;
 }
@@ -370,6 +372,7 @@ rudp_packet* create_packet(void *data, size_t data_size, int seq_ack_number){
     }
     // prepare memory - reset all data in allocated memory
     memset(&packet->header, 0, sizeof(packet->header));
+    memset(&packet->data, 0, sizeof(packet->data));
 
     packet->header.length = data_size;
     packet->header.seq_ack_number = seq_ack_number;
@@ -484,15 +487,16 @@ unsigned short int calculate_checksum(void *data, unsigned int bytes) {
     unsigned int total_sum = 0;
     // Main summing loop
     while (bytes > 1) {
-    total_sum += *data_pointer++;
-    bytes -= 2;
+        total_sum += *data_pointer++;
+        bytes -= 2;
     }
     // Add left-over byte, if any
     if (bytes > 0)
-    total_sum += *((unsigned char *)data_pointer);
+        total_sum += *((unsigned char *)data_pointer);
     // Fold 32-bit sum to 16 bits
-    while (total_sum >> 16)
-    total_sum = (total_sum & 0xFFFF) + (total_sum >> 16);
+    while (total_sum >> 16){
+        total_sum = (total_sum & 0xFFFF) + (total_sum >> 16);
+    }
     return (~((unsigned short int)total_sum));
 }
 
