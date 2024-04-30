@@ -8,7 +8,6 @@
 */
 #define USAGE "-p <server_port>"
 #define MAX_RUNS 10000
-
 /*
  * Strcuts:
 */
@@ -30,7 +29,7 @@ int main(int argc, char *argv[]){
     #ifndef _DEBUG
     if (argc != 3){
         fprintf(stderr, "Usage: %s", USAGE);
-        exit(1);
+        exit(FAIL);
     }
 
     // Getting info from main's args into ip and port of server
@@ -44,7 +43,7 @@ int main(int argc, char *argv[]){
         }
         else{
             fprintf(stderr, "Incorrect argument! Usage: %s", USAGE);
-            exit(1);
+            exit(FAIL);
         }
     }
     #endif
@@ -72,10 +71,6 @@ int main(int argc, char *argv[]){
     do {
         times++;
 
-        if (times == 2){
-            printf("TEST!");
-        }
-
         // Receive the size of the file in bytes (Sender prepares us for the file)
         bytes_received = rudp_recv(sock, &remaining_bytes, sizeof remaining_bytes, &client, &seq);
 
@@ -92,18 +87,20 @@ int main(int argc, char *argv[]){
         // Receive the file
         do {
             bytes_received = rudp_recv(sock, buffer, BUFSIZ, &client, &seq);
-            printf("Bytes received: %d\n", bytes_received);
             remaining_bytes -= bytes_received;
+            #ifdef _DEBUG
+            printf("Bytes received: %d\n", bytes_received);
             printf("Remaining received: %d\n", remaining_bytes);
+            #endif
             if (bytes_received <= -1){
                 perror("recv");
                 rudp_close(sock);
-                exit(1);
+                exit(FAIL);
             }
             else if (bytes_received == 0){
                 printf("Connection was closed prior to receiving the data1!\n");
                 rudp_close(sock);
-                exit(1);
+                exit(FAIL);
             }
             // Makes sure a '\0' exists at the end of the data to not accidently access forbidden memory - if we print the buffer
             // if (buffer[BUFSIZ - 1] != '\0'){
@@ -167,7 +164,4 @@ int main(int argc, char *argv[]){
     printf("Receiver end.\n");
     
     return 0;
-
-    // TODO remember to check for memory leaks and make sure we free everything
-    
 }

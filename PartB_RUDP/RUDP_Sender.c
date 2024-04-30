@@ -9,6 +9,7 @@
 */
 #define MIN_FILE_SIZE 2*MB           // 2MB
 #define USAGE "-ip <server_ip> -p <server_port>"
+extern int *b; /* only declaration, b is defined in other file.*/
 
 /*
  * Declaring Functions:
@@ -75,6 +76,10 @@ int main(int argc, char *argv[]){
     // Generate random data
     printf("Generating random data, of at least %dMB in size...\n", MIN_FILE_SIZE/MB);
     char *data = util_generate_random_data(MIN_FILE_SIZE+BUFSIZ);       // Generate data bigger than 2MB
+    if (data == NULL){
+        fprintf(stderr, "ERROR! Failed to allocate memory!\n");
+        exit(FAIL);
+    }
 
     int bytes_sent, total_bytes_sent;
     int file_size;
@@ -97,7 +102,7 @@ int main(int argc, char *argv[]){
             printf("Connection was closed prior to sending the data!\n");
             rudp_close(sock);
             free(data);
-            exit(1);
+            exit(FAIL);
         }
 
         // Send data
@@ -106,19 +111,21 @@ int main(int argc, char *argv[]){
             perror("send");
             rudp_close(sock);
             free(data);
-            exit(1);
+            exit(FAIL);
         }
         else if (bytes_sent == 0){
             printf("Connection was closed prior to sending the data!\n");
             rudp_close(sock);
             free(data);
-            exit(1);
+            exit(FAIL);
         }
 
         
         #ifdef _DEBUG
         printf("Sent data size: %d bytes.\n", bytes_sent);
         #endif
+
+        loss_optimization();
 
         printf("Do you want to send the file again?\n");
         printf("N - No\nY - Yes\n");
@@ -145,20 +152,23 @@ int main(int argc, char *argv[]){
         perror("send");
         rudp_close(sock);
         free(data);
-        exit(1);
+        exit(FAIL);
     }
     else if (bytes_sent == 0){
         printf("Connection was closed prior to sending the data!\n");
         rudp_close(sock);
         free(data);
-        exit(1);
+        exit(FAIL);
     }
 
     sleep(1);
     
     printf("Closing the RUDP connection...\n");
     rudp_close(sock);
-
+    #ifdef _DEBUG
+    printf("Max tries: %d\n", *b);
+    printf("packet loss: %f\n", loss_optimization());
+    #endif
     printf("Sender end.\n");
     free(data);
 
@@ -181,7 +191,6 @@ char* util_generate_random_data(unsigned int size){
     buffer = (char*)malloc(size * sizeof(char));
 
     if (buffer == NULL){
-        exit(1);
         return NULL;
     }
 

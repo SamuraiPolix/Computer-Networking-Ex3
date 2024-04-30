@@ -56,11 +56,23 @@ typedef struct _rudp_packet {
  * Static Consts:
 */
 static const int RUDP_MAX_DATA_SIZE = RUDP_MAX_PACKET_SIZE - sizeof(rudp_packet_header);
+static int max_tries = 0;
+int *b = &max_tries; /* global int pointer, pointing to global static*/
+
+// These are close to the best settings for 0% packet loss. if there is packet loss, the program will change those values to perform the best
+static int MAX_RETRIES = 10000;
+static int TIMEOUT_SEC = 0;
+static int TIMEOUT_USEC = 1000;
+
+// Used to calculate packet loss during the run and adjust timeout and retries
+static int packets_sent = 0;
+static int ack_received = 0;
 
 /*
  * Declating Functions:
 */
 unsigned short int calculate_checksum(void *data, unsigned int bytes);
+float calculate_packet_loss();
 char* get_packet_type(rudp_packet* packet);
 int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to);
 int rudp_send_ack(int sock_id, struct sockaddr_in *to, int seq_number);
@@ -95,13 +107,16 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint16_t * se
                 if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1){
                     fprintf(stderr, "Couldn't fix the error, Exiting...\n");
                     perror("setsockopt");
+                    close(sock);
                     exit(FAIL);
                 }
                 printf("Error is fixed.\nPlease restart the program!\n");
+                close(sock);
                 exit(FAIL);
             }
             else {
                 perror("bind");
+                close(sock);
                 exit(FAIL);
             }
         }
@@ -112,10 +127,14 @@ int rudp_socket(struct sockaddr_in *server_address, int peer_type, uint16_t * se
     if (peer_type == CLIENT) {
         // send SYN to server
         rudp_send_syn(sock, server_address, *seq_number);
+        printf("SYN Sent.\n");
+        printf("ACK-SYN Received.\n");
     } else if (peer_type == SERVER) {
         struct sockaddr_in client_addr;
         // wait for SYN from client
         *seq_number = rudp_recv_syn(sock, &client_addr);
+        printf("SYN Received.\n");
+        printf("ACK-SYN Sent.\n");
     }
     *seq_number += 1;
     printf("Handshake completed!\n");
@@ -126,9 +145,9 @@ int rudp_send(int sock_id, void *data, size_t data_size, int flags, struct socka
 {
     int chunk_size, remaining_bytes;
     int total_bytes_sent = 0, bytes_sent;
-    printf("Total packets needed: %ld\n", (data_size/RUDP_MAX_DATA_SIZE)+1);
+
     while (total_bytes_sent < data_size){
-        // calculate chunk size
+        // // calculate chunk size
         remaining_bytes = data_size-total_bytes_sent;
 
         #ifdef _DEBUG
@@ -170,26 +189,52 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
         if (bytes <= -1){
             perror("recv");
             close(sock);
-            exit(1);
+            exit(FAIL);
         }
         else if (bytes == 0){
             printf("Connection was closed prior to receiving the data4!\n");
             close(sock);
-            exit(1);
+            exit(FAIL);
         }
 
         #ifdef _DEBUG
         char* type = get_packet_type(packet);
         printf("Received %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+        if(packet->header.checksum != calculate_checksum(packet->data, sizeof(packet->data))){
+            printf("Checksum doesn't match: Received: %d, Calculated: %d\n", packet->header.checksum, calculate_checksum(packet->data, sizeof(packet->data)));
+        }
         #endif
-        // if by accident a syn was given -OR- seq doesnt match -OR- checksum doesnt match === wrong packet, ignore it and keep receiving
-    } while ((packet->header.flags.syn == 1) || (*seq != packet->header.seq_ack_number ) || (packet->header.checksum != calculate_checksum(packet->data, sizeof(packet->data))));
-    *seq += 1;
 
-    // Send ACK after receiving only if received packet was not ACK
-    if (packet->header.flags.ack != 1){
-        rudp_send_ack(sock, client_addr, packet->header.seq_ack_number+1);
-    }
+        // Send ACK after receiving only if received packet was not ACK
+        if (packet->header.flags.ack != 1){
+            rudp_send_ack(sock, client_addr, packet->header.seq_ack_number+1);
+        }
+        if (*(int*)(packet->data) == 0){    // sender wants to end connection - wait to see if more packet arrive (maybe the ack is lost)
+            struct timeval timeout;
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(sock, &read_fds);
+
+            int ready = select(sock + 1, &read_fds, NULL, NULL, &timeout);
+            if (ready == -1) {
+                perror("select");
+                close(sock);
+                exit(FAIL);
+            } else if (ready == 0) {
+                break;      // no more packets - connection will be closed
+            } else {
+                continue;       // recv again and resend ack
+            }
+        }
+        if ((packet->header.flags.syn != 1) && *seq == packet->header.seq_ack_number && (packet->header.checksum == calculate_checksum(packet->data, sizeof(packet->data)))){
+            break;
+        }
+        // else // if by accident a syn was given -OR- seq doesnt match -OR- checksum doesnt match === wrong packet, ignore it and keep receiving
+    } while (1);
+    *seq += 1;
 
     data_size = packet->header.length;
 
@@ -216,6 +261,7 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
 
     // Send packet
     do {    // while ACK not received or timed out
+        packets_sent++;
         #ifdef _DEBUG
         printf("Try #%d\n", tries+1);
         #endif
@@ -233,13 +279,17 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
         }
         bytes_sent = packet->header.length;     // actual data size
 
+        // optimize loss
+        float packet_loss = loss_optimization(); 
+
         #ifdef _DEBUG
         char* type = get_packet_type(packet);
         printf("Sending %spacket, SEQ: %d\n", type, packet->header.seq_ack_number);
+        printf("Packet loss; %f\n", packet_loss);
         #endif
 
         // Wait for new packet - ACK if sent packet was data or SYN, and data if sent packet was ACK
-        if (packet->header.flags.ack != 1) {
+        if (packet->header.flags.ack != 1) {   
             // Check if ACK received
             struct timeval timeout;
             timeout.tv_sec = TIMEOUT_SEC;
@@ -265,6 +315,9 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
                 int seq = rudp_recv_ack(sock_id, to);
                 if (seq == -1 || seq != packet->header.seq_ack_number+1) {
                     // ack doesnt match seq
+                    #ifdef _DEBUG
+                    printf("ACK doesn't match SEQ, resending...\n");
+                    #endif
                     continue;   // resend
                 } else {
                     // a good ACK was received
@@ -275,10 +328,16 @@ int rudp_send_packet(rudp_packet* packet, int sock_id, struct sockaddr_in *to) {
         else{
             break;
         }
-    } while (tries < MAX_RETRIES);     // Resend if ACK was not received. Only if this packet is not an ACK
+    } while (tries < MAX_RETRIES || packet->header.length == 4);     // Resend if ACK was not received. Only if this packet is not an ACK
 
-    if (tries == MAX_RETRIES)
-        exit(1);
+    if (tries > max_tries)
+        max_tries = tries;
+    if (tries == MAX_RETRIES){
+        fprintf(stderr, "ERROR! Exceeded max retries to send packet! exiting...\n");
+        close(sock_id);
+        exit(FAIL);
+    }
+
 
     return bytes_sent;
 }
@@ -335,6 +394,9 @@ int rudp_recv_packet(int sock, rudp_packet * packet, size_t packet_size, struct 
     // Send ACK after receiving only if received packet was not ACK
     if (packet->header.flags.ack != 1){
         rudp_send_ack(sock,client_addr,packet->header.seq_ack_number+1);
+    }
+    else {
+        ack_received++;
     }
     
     return data_size;
@@ -432,4 +494,59 @@ unsigned short int calculate_checksum(void *data, unsigned int bytes) {
     while (total_sum >> 16)
     total_sum = (total_sum & 0xFFFF) + (total_sum >> 16);
     return (~((unsigned short int)total_sum));
+}
+
+// A simple calculating for packet loss - not 100% accurate but gives a reasonable result to improve perfomance 
+float calculate_packet_loss() {
+    if (packets_sent == 0) {
+        return 0.0; // no packets sent. 0 loss
+    }
+    return ((1.0 - ((float)ack_received / (float)packets_sent)) * 100.0)/2;
+}
+
+// tries to deal with the packet loss by adjusting the timeout and retries for best performance
+/* From my tests I found that the recommended values for best performance are:
+(Big loss: the timeout should be as low as possible and max_retries as big as possible)
+ * 0% loss: 5 retries, 1 timeout_sec
+ * 2% loss: 100 retries, 1000 timeout_usec
+ * 5% loss: 400 retries, 100 timeout_usec
+ * 10% loss: 500 retries, 15 timeout_usec
+ * 50% loss: 1000 retries, 15 timeout_usec
+ * 75% loss: 10000 retries, 15 timeout_usec
+*/
+float loss_optimization(){
+    // this is not the best but It does do a great job dealing with high losses
+    float packet_loss = calculate_packet_loss();
+
+    if (packet_loss < 1) {
+        MAX_RETRIES = 100;
+        TIMEOUT_SEC = 1;
+        TIMEOUT_USEC = 0;
+    } else if (packet_loss < 2) {
+        MAX_RETRIES = 100;
+        TIMEOUT_SEC = 0;
+        TIMEOUT_USEC = 1000;
+    } else if (packet_loss < 6) {
+        MAX_RETRIES = 100;
+        TIMEOUT_SEC = 0;
+        TIMEOUT_USEC = 500;
+    } else if (packet_loss < 11) {
+        MAX_RETRIES = 400;
+        TIMEOUT_SEC = 0;
+        TIMEOUT_USEC = 100;
+    } else if (packet_loss < 43) {
+        MAX_RETRIES = 500;
+        TIMEOUT_SEC = 0;
+        TIMEOUT_USEC = 15;
+    } else if (packet_loss < 53) {
+        MAX_RETRIES = 5000;
+        TIMEOUT_SEC = 0;
+        TIMEOUT_USEC = 15;
+    } else {
+        MAX_RETRIES = 10000;
+        TIMEOUT_SEC = 0;
+        TIMEOUT_USEC = 0;
+    }
+
+    return packet_loss;
 }

@@ -16,11 +16,20 @@
 #define RUDP_MAX_PACKET_SIZE 576        // Sources: RFC 791, RFC 1122, RFC 2460
 
 // !!! We decided to remove the timeout (its faster this way), so we raised the MAX_RETRIES to give the ack a chance to arrive.
-// !!! t does consume more bandwidth so if thats important we can raise TIMEOUT_USEC to 10000.
+// !!! It does consume more bandwidth so if thats important we can raise TIMEOUT_USEC to 10000.
 // !!! I tested the speeds with various timeouts and 0 performed the best but we decided to leave this option here
-#define MAX_RETRIES 25
-#define TIMEOUT_SEC 1000
-#define TIMEOUT_USEC 0
+/* Recommended values for best performance: (Big loss: the timeout should be as low as possible and max_retries as big as possible)
+ * 0% loss: 5 retries, 1 timeout_sec
+ * 2% loss: 100 retries, 1000 timeout_usec
+ * 5% loss: 400 retries, 100 timeout_usec
+ * 10% loss: 500 retries, 15 timeout_usec
+ * 50% loss: 1000 retries, 15 timeout_usec
+ * 75% loss: 10000 retries, 15 timeout_usec
+*/
+// #define MAX_RETRIES 10000
+// #define TIMEOUT_SEC 0
+// #define TIMEOUT_USEC 100
+// Changes them to static and placed it into RUDP_API.c so they can be modified during the run according to the calculated packet loss
 
 #define SERVER 1
 #define CLIENT 0
@@ -67,3 +76,7 @@ int rudp_recv(int sock, void * data, size_t data_size, struct sockaddr_in *clien
  * @return 
 */
 void rudp_close(int sock);
+
+// A function that attemps to improve performance according to the calculated packet loss.
+// returns packet loss
+float loss_optimization();
