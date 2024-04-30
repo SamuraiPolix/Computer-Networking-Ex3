@@ -20,5 +20,16 @@ https://github.com/SamuraiPolix/Computer-Networking-Ex3/assets/52662032/29fef3bd
 
 https://github.com/SamuraiPolix/Computer-Networking-Ex3/assets/52662032/4a9f221e-1a50-47e6-a55f-6ed602c00164
 
+### Part B - Tranferring a large file over our implemented RUDP:
+
+*Will upload later
 
 
+### Part C - Research
+
+*Will upload later
+
+___
+Tested on Ubuntu 22.04.3 LTS. Verified memory leak-free by Valgrind.
+
+![Memory leak-free](https://github.com/SamuraiPolix/Computer-Networking-Ex3/assets/52662032/4014563f-15ca-475d-86fe-ab9a40141b24)
